@@ -1,0 +1,173 @@
+You are setting up the sw-cor24-x-pc-aotc repository for AI-agent-driven
+development. This repo lives at ~/github/sw-embed/sw-cor24-x-pc-aotc/
+and will contain an AOT (ahead-of-time) compiler from p-code to COR24
+assembly.
+
+Read docs/research.txt thoroughly before proceeding. It contains all
+design decisions already made. Do not revisit or change them.
+
+== WHAT THIS PROJECT IS ==
+
+sw-cor24-x-pc-aotc is an AOT compiler that translates p-code bytecode
+(produced by the Pascal compiler p24p) into COR24 .s assembly files.
+The output feeds into the existing assembler/linker toolchain to produce
+native COR24 binaries — no p-code interpreter needed at runtime.
+
+The x- prefix means this is a cross-tool written in Rust, running on
+the host (not on COR24 hardware).
+
+Key design decisions already locked in (from research.txt):
+- Written in Rust, runs on host machine
+- AOT first, JIT deferred to far-future
+- Direct lowering first (p-code → .s), graduate to IR-based later
+- Differential testing against the p-code interpreter (pv24a) is the
+  core validation strategy
+- Share semantic specs and test cases with the interpreter, NOT code
+- Runtime helpers (write_int, heap_alloc, bounds_check, etc.) are
+  called from generated code, not inlined
+- Interpreter remains the canonical reference forever
+
+Recommended Rust crate structure (from research.txt):
+- pcode-model: opcode definitions, decoded instructions, procedure metadata
+- pcode-analyze: CFG, stack-depth analysis, validation
+- pcode-lower: lowering from p-code to simple IR
+- cor24-emit-asm: COR24 assembly emission from lowered IR
+- pcode-aotc: CLI binary
+
+== YOUR TASKS ==
+
+1. Write a proper README.md:
+   - Project name, one-line description
+   - What AOT compilation means in this context
+   - Current status: "In development"
+   - Naming convention table (x- prefix = cross-tool on host)
+   - Relationship to other repos: sw-cor24-pcode (VM + tools),
+     sw-cor24-pascal (Pascal compiler), sw-cor24-x-assembler (assembler),
+     sw-cor24-emulator (emulator for testing)
+   - Pipeline diagram: .pas → p24p → .p24 → pc-aotc → .s → as24 → binary
+   - License section
+
+2. Write CLAUDE.md with the agentrail protocol:
+   - Project overview paragraph
+   - CRITICAL: AgentRail Session Protocol section (copy the exact
+     protocol pattern from ~/github/sw-embed/sw-cor24-assembler/CLAUDE.md)
+   - Key Rules section
+   - Useful Commands section
+   - Build / Test section (cargo build, cargo test, differential testing)
+   - Architecture section (front end / middle end / back end)
+   - Cross-Repo Context section listing sibling repos
+   - Note: this is a Rust project (cargo workspace), not a C project
+
+3. Create .agentrail/saga.toml with:
+   - name = "pc-aotc"
+   - description of the project
+   - status = "active"
+   - current_step = 1
+   - A plan section summarizing the 8-stage approach from research.txt
+
+4. Create saga steps in .agentrail/steps/. Derive these from the
+   8-stage plan in research.txt. Suggested breakdown:
+
+   001-formalize-contracts: Document the p-code instruction semantics,
+       activation record layout, calling convention, runtime helper ABI,
+       memory regions, and error behavior. Create docs/abi.md and
+       docs/pcode-spec.md. Reference the existing p-code VM (pv24a)
+       and Pascal compiler (p24p) in sw-cor24-pcode and sw-cor24-pascal.
+
+   002-interpreter-tracing: Add a tracing mode to the p-code interpreter
+       (in sw-cor24-pcode) that logs p-code PC, stack state, and
+       locals/globals for each instruction. This becomes the golden
+       reference for differential testing. Create deterministic test
+       programs in Pascal.
+
+   003-cargo-workspace: Set up the Rust workspace with crate stubs:
+       pcode-model, pcode-analyze, pcode-lower, cor24-emit-asm,
+       pcode-aotc (CLI). Add Cargo.toml workspace config. Verify
+       cargo build and cargo test work (empty tests pass).
+
+   004-pcode-decoder: Implement p-code file parsing in pcode-model.
+       Read p-code binary format, decode instructions into structured
+       representation. Define the opcode enum and instruction struct.
+       Test with small p-code files from the Pascal compiler.
+
+   005-direct-lowering-subset: Implement direct p-code → .s translation
+       for a tiny subset: integer constants (LIT), local load/store,
+       add/sub/mul, comparisons, conditional/unconditional jumps.
+       Emit .s text via cor24-emit-asm. Target: compile and run a
+       simple arithmetic Pascal program natively.
+
+   006-procedure-calls: Add procedure call/return lowering. Implement
+       activation record setup (push frame, save registers, set up
+       locals). Handle parameter passing. Runtime helper calls for
+       write_int, write_char, etc.
+
+   007-differential-testing: Build the differential test harness.
+       For each Pascal test program: compile to p-code, run under
+       interpreter (with tracing), compile to native via AOT, run
+       native, compare stdout + exit code + selected state.
+
+   008-control-flow: Complete control flow lowering: while loops,
+       for loops, case/switch, nested if/else. Basic block analysis
+       in pcode-analyze. Stack-depth propagation at block boundaries.
+
+   009-arrays-records: Add lowering for Pascal arrays and records.
+       Bounds checking via runtime helper calls. Record field offset
+       calculation. Array indexing with element size multiplication.
+
+   010-ir-layer: Graduate from direct lowering to IR-based lowering.
+       Define the IR instruction set (Const, LoadLocal, StoreLocal,
+       LoadGlobal, StoreGlobal, BinOp, Compare, Jump, Branch, Call,
+       Return). Implement pcode-lower to produce IR. Update
+       cor24-emit-asm to consume IR instead of direct p-code.
+
+   011-optimizations: Basic optimizations on the IR: constant folding,
+       dead temporary elimination, top-of-stack caching (keep TOS in
+       r0, NOS in r1), branch simplification. Measure code size
+       improvement vs direct lowering.
+
+   012-heap-runtime: Add heap allocation (new/dispose), string
+       operations, set operations, and remaining runtime helpers.
+       Test with Pascal programs using dynamic allocation.
+
+   013-full-validation: Comprehensive differential testing across
+       the full Pascal test suite from sw-cor24-pascal. Fix any
+       behavioral divergences. Benchmark native vs interpreted
+       execution speed.
+
+   014-docs-release: Update README, document the architecture,
+       add CHANGES.md, document the p-code → native pipeline,
+       push to GitHub. Update sw-cor24-project status.
+
+   Each step.toml should have [step] with name, status = "pending",
+   and a detailed prompt field explaining exactly what to implement
+   and how to test it. Reference the research.txt for design details.
+
+5. Commit everything and push to GitHub.
+
+== KEY TECHNICAL DETAILS ==
+
+COR24 register constraints (only 3 working registers):
+- r0, r1, r2: scratch/expression (r0 = return value)
+- r3 (fp): frame pointer
+- r4 (sp): stack pointer
+- r5 (z): zero register
+- r6 (iv): interrupt vector
+- r7 (ir): interrupt return
+
+Register allocation strategy: TOS caching in r0, NOS optionally in
+r1/r2, everything else in memory (frame slots / eval stack).
+
+Runtime helpers are called (not inlined) for: integer output, character
+output, string operations, heap alloc/free, bounds checking, set
+operations, error reporting.
+
+== SIBLING REPOS FOR REFERENCE ==
+
+- ~/github/sw-embed/sw-cor24-assembler/ — same CLAUDE.md/agentrail
+  pattern to follow
+- ~/github/sw-embed/sw-cor24-pcode/ — p-code VM (pv24a), assembler
+  (pa24r), linker (pl24r) — this is the interpreter being targeted
+- ~/github/sw-embed/sw-cor24-pascal/ — Pascal compiler (p24p) that
+  produces the p-code input
+- ~/github/sw-embed/sw-cor24-x-assembler/ — Rust cross-assembler
+- ~/github/sw-embed/sw-cor24-emulator/ — emulator for running tests
