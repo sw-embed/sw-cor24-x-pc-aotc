@@ -1,0 +1,41 @@
+[step]
+name = "007-differential-testing"
+status = "pending"
+prompt = """
+Build the differential test harness that validates AOT output against
+the interpreter.
+
+1. Create a test runner script or Rust integration test that, for each
+   Pascal test program:
+   a. Compile .pas to .p24 with p24p.
+   b. Run .p24 under pv24a interpreter, capture stdout and exit code.
+   c. AOT compile .p24 to .s with pc-aotc.
+   d. Assemble .s to binary with as24.
+   e. Run binary on emulator (cor24-run), capture stdout and exit code.
+   f. Compare: stdout must match exactly, exit codes must match.
+
+2. Test corpus (expand from earlier steps):
+   - arithmetic.pas: integer expressions
+   - locals.pas: local variable manipulation
+   - if_else.pas: conditional branches
+   - while_loop.pas: while loops
+   - procedure_call.pas: procedure calls with params
+   - recursion.pas: recursive factorial
+   - globals.pas: global variable access
+   - nested_calls.pas: multiple levels of procedure nesting
+
+3. Reporting:
+   - For each test: PASS/FAIL with expected vs actual output on failure.
+   - Summary: total passed/failed/skipped.
+   - On failure, show the diff and optionally the generated .s for
+     inspection.
+
+4. Integration with cargo test:
+   - These should be runnable via cargo test or a dedicated test command.
+   - Tests that require external tools (p24p, pv24a, as24, cor24-run)
+     should be skipped gracefully if tools are not found, with a
+     clear message.
+
+5. This harness is the primary quality gate for all future development.
+   Every new opcode or feature must pass differential testing.
+"""

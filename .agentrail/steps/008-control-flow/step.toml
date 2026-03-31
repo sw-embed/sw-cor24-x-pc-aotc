@@ -1,0 +1,38 @@
+[step]
+name = "008-control-flow"
+status = "pending"
+prompt = """
+Complete control flow lowering and add basic block analysis.
+
+1. Implement remaining control flow opcodes:
+   - While loops: JPC at loop top, JMP back at loop bottom.
+   - For loops: counter initialization, increment, bounds check, exit.
+   - Case/switch: jump table or chained comparisons.
+   - Nested if/else: proper label generation and branch threading.
+
+2. Implement basic block analysis in pcode-analyze:
+   - Identify basic block boundaries (leaders): targets of jumps,
+     instructions after conditional jumps, procedure entry points.
+   - Build a control flow graph (CFG) as a list of basic blocks with
+     successor/predecessor edges.
+   - This is needed for stack-depth propagation and future optimizations.
+
+3. Implement stack-depth propagation:
+   - At each basic block boundary, compute the eval stack depth.
+   - Verify stack depth is consistent at merge points (where multiple
+     paths converge).
+   - Flag errors if stack depth is inconsistent (indicates a p-code
+     generation bug or decoder error).
+
+4. Label generation:
+   - Generate unique labels for branch targets.
+   - Map p-code addresses to assembly labels.
+   - Handle forward references cleanly.
+
+5. Test with Pascal programs exercising each control flow pattern:
+   - Nested while loops
+   - For loop with various bounds
+   - Case statement with multiple branches
+   - Complex nested if/else/if chains
+   - All must pass differential testing.
+"""

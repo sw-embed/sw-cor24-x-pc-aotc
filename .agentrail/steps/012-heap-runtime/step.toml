@@ -1,0 +1,38 @@
+[step]
+name = "012-heap-runtime"
+status = "pending"
+prompt = """
+Add heap allocation, string operations, set operations, and remaining
+runtime helpers.
+
+1. Heap allocation:
+   - new/dispose (Pascal dynamic allocation) via runtime helper calls.
+   - heap_alloc(size) → pointer: allocate from heap region.
+   - heap_free(pointer): return memory to heap.
+   - Implement a simple heap allocator in the runtime library
+     (e.g., bump allocator or free-list).
+
+2. String operations:
+   - String comparison, concatenation, length.
+   - String constant loading from the constant pool.
+   - write_string runtime helper for string output.
+   - Handle Pascal's fixed-length string semantics.
+
+3. Set operations (if supported by the p-code):
+   - Set union, intersection, difference, membership test.
+   - These may be implemented as runtime helper calls for simplicity.
+
+4. Remaining runtime helpers:
+   - read_int, read_char (input from UART/stdin).
+   - write_bool, write_string.
+   - Integer division and modulo if not already handled.
+   - Odd/even test.
+   - Any remaining OPR variants not yet implemented.
+
+5. Test with Pascal programs using:
+   - Dynamic allocation (new/dispose).
+   - String manipulation.
+   - Set operations (if applicable).
+   - Mixed programs combining heap, strings, and arithmetic.
+   - All must pass differential testing.
+"""

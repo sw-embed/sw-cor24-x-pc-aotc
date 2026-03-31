@@ -1,0 +1,46 @@
+[step]
+name = "005-direct-lowering-subset"
+status = "pending"
+prompt = """
+Implement direct p-code to .s translation for a tiny subset of opcodes.
+This is the proof-of-concept that validates the whole pipeline.
+
+1. Target opcodes for this step:
+   - LIT (integer constant → push to stack)
+   - LOD (load local variable)
+   - STO (store local variable)
+   - OPR ADD, SUB, MUL (arithmetic on TOS/NOS)
+   - OPR comparisons (EQ, NE, LT, GE, GT, LE)
+   - JMP (unconditional jump)
+   - JPC (conditional jump, branch if TOS is zero/false)
+
+2. Implement in cor24-emit-asm:
+   - Assembly text emitter: write COR24 .s instructions to a string/file.
+   - For each supported p-code opcode, emit the corresponding COR24
+     assembly sequence.
+   - Use the eval stack in memory, with TOS caching in r0 where possible.
+   - Emit comments mapping p-code PC to assembly location for debugging.
+
+3. Register usage for this step:
+   - r0: TOS cache / scratch
+   - r1: NOS / scratch
+   - r2: scratch
+   - r3 (fp): frame pointer
+   - r4 (sp): stack pointer (eval stack)
+   - r5 (z): zero register
+
+4. Implement in pcode-aotc CLI:
+   - Read a .p24 file (using pcode-model decoder from step 004).
+   - Lower each instruction to assembly (using cor24-emit-asm).
+   - Write the .s output file.
+
+5. Target test: compile a simple arithmetic Pascal program:
+   - program test; var x: integer; begin x := 2 + 3 * 4; write(x) end.
+   - Compile to p-code with p24p.
+   - AOT compile to .s with pc-aotc.
+   - Assemble with as24 and run on emulator.
+   - Verify output matches interpreter.
+
+6. The generated .s must assemble cleanly with the cross-assembler
+   (sw-cor24-x-assembler) and produce correct results on the emulator.
+"""

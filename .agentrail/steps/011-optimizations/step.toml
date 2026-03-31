@@ -1,0 +1,37 @@
+[step]
+name = "011-optimizations"
+status = "pending"
+prompt = """
+Implement basic optimizations on the IR to improve generated code quality.
+
+1. Constant folding:
+   - If both operands of a BinOp or Compare are Const, evaluate at
+     compile time and replace with a single Const.
+   - Propagate through chains (e.g., Const + Const → Const).
+
+2. Dead temporary elimination:
+   - If an IR temporary is written but never read, remove the
+     instruction that produces it.
+   - Simple liveness analysis within basic blocks.
+
+3. Top-of-stack caching:
+   - Keep TOS value in r0 across sequences of operations.
+   - Keep NOS in r1 when beneficial.
+   - Avoid redundant push/pop sequences for consecutive arithmetic.
+   - This is the single biggest win for a stack-based VM on a
+     register-starved architecture.
+
+4. Branch simplification:
+   - Branch to the immediately following instruction → remove branch.
+   - Jump to jump → redirect to final target.
+   - Unreachable code elimination after unconditional jumps.
+
+5. Measure improvement:
+   - Compare code size (number of .s instructions) before and after
+     optimizations for each test program.
+   - Report percentage reduction.
+   - Verify all differential tests still pass.
+
+6. Optimizations must be individually toggleable via CLI flags for
+   debugging (e.g., --no-opt, --opt-fold, --opt-dce, --opt-tos-cache).
+"""

@@ -1,0 +1,44 @@
+[step]
+name = "006-procedure-calls"
+status = "pending"
+prompt = """
+Add procedure call and return lowering. Implement activation record
+setup and runtime helper calls.
+
+1. Implement CAL (call procedure) lowering:
+   - Push activation record: return address, old frame pointer,
+     static link (for nested procedures).
+   - Save any caller-saved registers.
+   - Set up new frame pointer.
+   - Allocate space for local variables on the stack.
+   - Jump to procedure entry point.
+
+2. Implement OPR RETURN lowering:
+   - Restore frame pointer from activation record.
+   - Deallocate locals and activation record.
+   - Restore return address.
+   - Jump back to caller.
+
+3. Implement parameter passing:
+   - Parameters pushed by caller before CAL.
+   - Callee accesses them at known frame offsets.
+   - Handle value parameters (copy) vs reference parameters if applicable.
+
+4. Implement runtime helper calls:
+   - write_int: call a runtime routine to output an integer.
+   - write_char: call a runtime routine to output a character.
+   - writeln: call a runtime routine to output a newline.
+   - These are external symbols resolved by the assembler/linker.
+
+5. Create a minimal runtime helper library:
+   - Assembly source for write_int, write_char, writeln.
+   - These use UART or system calls as appropriate for the emulator.
+   - Link with AOT-compiled programs.
+
+6. Test with Pascal programs:
+   - Simple procedure call with parameters.
+   - Procedure returning a value via the function result location.
+   - Nested procedure calls.
+   - Recursive procedure (factorial).
+   - Verify output matches interpreter for all cases.
+"""

@@ -1,0 +1,33 @@
+[step]
+name = "004-pcode-decoder"
+status = "pending"
+prompt = """
+Implement p-code file parsing and instruction decoding in pcode-model.
+
+1. Define the opcode enum in pcode-model:
+   - Every p-code opcode from the pv24a interpreter.
+   - Each variant should document its stack effect and operand format.
+   - Use the pcode-spec.md from step 001 as the source of truth.
+
+2. Define the instruction struct:
+   - Opcode, operands (level, address/value), source p-code PC offset.
+   - Decoded representation, not raw bytes.
+
+3. Define procedure metadata struct:
+   - Entry point, local variable count, parameter count, nesting level.
+
+4. Implement p-code binary file reader:
+   - Parse the p-code file header.
+   - Read the code section and decode each instruction.
+   - Read the constant pool and procedure table.
+   - Return a structured Program representation.
+
+5. Test with small p-code files:
+   - Compile trivial Pascal programs with p24p.
+   - Read the resulting .p24 files with the decoder.
+   - Verify decoded instructions match expected opcode sequences.
+   - Test error handling for malformed/truncated files.
+
+Reference: Study the p-code file format by examining p24p's output
+and pv24a's loader in sw-cor24-pcode.
+"""

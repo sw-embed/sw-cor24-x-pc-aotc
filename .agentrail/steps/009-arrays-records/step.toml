@@ -1,0 +1,35 @@
+[step]
+name = "009-arrays-records"
+status = "pending"
+prompt = """
+Add lowering for Pascal arrays and records.
+
+1. Array support:
+   - Array indexing: base address + (index - lower_bound) * element_size.
+   - Bounds checking via runtime helper call (bounds_check).
+   - Array element load and store.
+   - Multi-dimensional arrays if the p-code supports them.
+
+2. Record support:
+   - Record field access: base address + field offset.
+   - Field offset calculation based on field types and sizes.
+   - Record assignment (block copy if needed).
+
+3. Runtime helpers:
+   - bounds_check(index, lower, upper): halt with error if out of range.
+   - Emit the bounds_check call before each array access.
+   - Add bounds_check to the runtime helper library.
+
+4. Address calculation lowering:
+   - LDA (load address) opcode for computing addresses of variables,
+     array elements, record fields.
+   - Pointer arithmetic for indexed access.
+
+5. Test with Pascal programs:
+   - Simple array declaration, assignment, and access.
+   - Array with bounds checking (both in-bounds and out-of-bounds).
+   - Record with multiple fields of different types.
+   - Array of records.
+   - Pass array/record as parameter.
+   - All must pass differential testing against interpreter.
+"""

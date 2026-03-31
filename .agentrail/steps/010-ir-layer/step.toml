@@ -1,0 +1,43 @@
+[step]
+name = "010-ir-layer"
+status = "pending"
+prompt = """
+Graduate from direct lowering to IR-based lowering. This is the
+transition from Strategy 1 (direct p-code → .s) to Strategy 2
+(p-code → IR → .s) from the research document.
+
+1. Define the IR instruction set in pcode-lower:
+   - Const(dst, imm): load immediate constant
+   - LoadLocal(dst, offset): load from frame slot
+   - StoreLocal(offset, src): store to frame slot
+   - LoadGlobal(dst, sym): load global variable
+   - StoreGlobal(sym, src): store global variable
+   - BinOp(dst, a, b, op): arithmetic/logic binary operation
+   - Compare(dst, a, b, cond): comparison producing boolean
+   - Jump(label): unconditional branch
+   - Branch(cond, true_label, false_label): conditional branch
+   - Call(dst?, fn, args): procedure/function call
+   - Return(src?): return from procedure
+   - StackLoad(dst, depth): load from eval stack position
+   - StackStore(depth, src): store to eval stack position
+
+2. Implement the p-code → IR lowering pass:
+   - For each p-code instruction, produce one or more IR instructions.
+   - Track virtual registers or temporaries.
+   - Maintain eval stack state abstractly (map stack positions to
+     IR temporaries).
+
+3. Update cor24-emit-asm to consume IR instead of direct p-code:
+   - Map IR instructions to COR24 assembly sequences.
+   - Virtual register allocation: map IR temporaries to r0-r2 or
+     spill to stack.
+   - This replaces the direct p-code → .s path.
+
+4. Verify no behavioral regression:
+   - All existing differential tests must still pass.
+   - Generated code may differ in structure but must produce identical
+     results.
+
+5. Add IR dump mode to pcode-aotc CLI (--dump-ir) for debugging
+   and inspection of the lowered form.
+"""

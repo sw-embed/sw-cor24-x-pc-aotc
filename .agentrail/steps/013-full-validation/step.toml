@@ -1,0 +1,38 @@
+[step]
+name = "013-full-validation"
+status = "pending"
+prompt = """
+Comprehensive differential testing across the full Pascal test suite.
+Fix any behavioral divergences. Benchmark performance.
+
+1. Run the full test suite from sw-cor24-pascal:
+   - Every Pascal test program that compiles with p24p should be
+     tested through the AOT pipeline.
+   - Track which programs pass, fail, or are unsupported.
+   - Target: 100% pass rate for supported features.
+
+2. Fix behavioral divergences:
+   - For each failing test, identify the root cause.
+   - Common issues: incorrect stack handling, wrong frame offsets,
+     missing opcodes, off-by-one errors in array bounds,
+     incorrect sign handling in comparisons.
+   - Fix and re-test until all supported tests pass.
+
+3. Edge case testing:
+   - Maximum recursion depth.
+   - Large arrays.
+   - Deeply nested procedure calls.
+   - Programs that stress the eval stack depth.
+   - Integer overflow/underflow behavior.
+
+4. Performance benchmarking:
+   - For a set of benchmark programs (loops, recursion, array access),
+     measure execution time under interpreter vs native.
+   - Report speedup factor.
+   - Measure code size: p-code bytes vs .s lines vs binary bytes.
+
+5. Document any known limitations:
+   - Pascal features not yet supported by the AOT compiler.
+   - Cases where behavior diverges from the interpreter by design.
+   - Performance characteristics and recommendations.
+"""

@@ -1,0 +1,37 @@
+[step]
+name = "003-cargo-workspace"
+status = "pending"
+prompt = """
+Set up the Rust cargo workspace with crate stubs. Verify everything
+builds and empty tests pass.
+
+1. Create top-level Cargo.toml as a workspace:
+   - Members: pcode-model, pcode-analyze, pcode-lower, cor24-emit-asm,
+     pcode-aotc
+   - Set edition = "2021", rust-version as appropriate.
+
+2. Create each crate with cargo init or manually:
+   - crates/pcode-model/: lib crate for opcode definitions, decoded
+     instructions, procedure metadata.
+   - crates/pcode-analyze/: lib crate for CFG, stack-depth analysis,
+     validation. Depends on pcode-model.
+   - crates/pcode-lower/: lib crate for lowering p-code to simple IR.
+     Depends on pcode-model, pcode-analyze.
+   - crates/cor24-emit-asm/: lib crate for COR24 assembly emission.
+     Depends on pcode-lower.
+   - crates/pcode-aotc/: binary crate (CLI). Depends on all above.
+
+3. Each lib crate should have a minimal lib.rs with a doc comment
+   explaining its purpose. Each should have at least one trivial test.
+
+4. pcode-aotc should have a main.rs that prints a version/usage banner.
+
+5. Verify:
+   - cargo build succeeds
+   - cargo test succeeds (all trivial tests pass)
+   - cargo clippy is clean
+   - cargo fmt produces no changes
+
+6. Add a .gitignore for /target/ and Cargo.lock (or include Cargo.lock
+   if preferred for the binary crate).
+"""

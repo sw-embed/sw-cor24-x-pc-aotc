@@ -1,0 +1,38 @@
+[step]
+name = "001-formalize-contracts"
+status = "pending"
+prompt = """
+Document the p-code instruction semantics, activation record layout,
+calling convention, runtime helper ABI, memory regions, and error behavior.
+
+1. Create docs/pcode-spec.md:
+   - List every p-code opcode with its stack effect, operands, and semantics.
+   - Reference the existing p-code VM (pv24a) in sw-cor24-pcode as the
+     canonical source of truth.
+   - Reference the Pascal compiler (p24p) in sw-cor24-pascal for how
+     p-code is generated.
+   - Document the p-code binary file format (header, code section,
+     constant pool, procedure table).
+
+2. Create docs/abi.md:
+   - Activation record layout: return address, old frame pointer,
+     static link, local variables, temporaries, function result location.
+   - Calling convention: which COR24 registers are caller-saved vs
+     callee-saved, where function results go, how parameters are passed.
+   - Register assignments: r0-r2 scratch/expression, r3=fp, r4=sp,
+     r5=z (zero), r6=iv, r7=ir.
+   - Memory regions: code segment, global/static data, heap (if any),
+     Pascal call stack, VM eval stack.
+   - Runtime helper ABI: calling convention for helpers like write_int,
+     write_char, heap_alloc, bounds_check. Helpers are called, not inlined.
+   - Error behavior: divide by zero, nil pointer, bounds error, illegal
+     opcode, stack overflow, out of memory.
+
+3. Study the interpreter source in sw-cor24-pcode to extract actual
+   opcode behaviors and frame layout. Cross-reference with the Pascal
+   compiler's code generation in sw-cor24-pascal.
+
+4. These docs become the contract between the AOT compiler and the
+   runtime. They must be precise enough that two independent
+   implementations can produce compatible code.
+"""

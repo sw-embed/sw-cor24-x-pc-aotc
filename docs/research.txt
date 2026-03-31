@@ -1,0 +1,2116 @@
+
+
+
+
+I have a custom p-code VM implemented in COR24 ISA assembler.  I have a Pascal compiler (cross-compiled from C to the same assembler).  The VM is an interpeter, without a JIT (p-code to to machine code) compiler.  It might also be useful (if possible) to have an AOT (p-code to .s) translator/compiler.  How would I implement this?  The JIT would be running on the cor24 ISA, so it would have to be cross-compiled from C to .s and then assembled/linked into the VM.  The AOT tool could be written in Rust to take p-code and produce .s files (but it would be nice if the AOT tool could run on cor24 ISA directly, so this requires implementing it in C.  Discuss the feasibility and potential issues and come up with recommendations and a plan.
+
+You have three related implementation choices:
+
+Stay with the interpreter only
+
+Add a JIT inside the COR24 VM/runtime
+
+Add an AOT translator from p-code to COR24 .s
+
+Given your environment, I would treat these as an evolutionary ladder, not parallel first efforts:
+
+First: make the interpreter better and more compiler-friendly
+
+Second: build an AOT p-code → .s translator
+
+Third: only after that, consider a very small tracing/template JIT, if it still seems worth it
+
+The reason is architectural: an AOT backend and a JIT backend share most of the same hard problems, but the AOT version is dramatically easier to debug, test, and bootstrap.
+
+1. Requirements and architecture framing
+What you have now
+You already have:
+
+a custom COR24 ISA
+
+a p-code VM/interpreter in COR24 assembler
+
+a Pascal compiler producing p-code
+
+a toolchain that can run on Mac/Linux and also some tooling on COR24 itself
+
+That is already enough to support two execution models:
+
+portable execution via the interpreter
+
+native execution via translation/compilation
+
+What you are asking for
+You want to know how to add:
+
+a JIT that runs on COR24 itself and emits executable COR24 code at runtime
+
+an AOT translator/compiler that turns p-code into COR24 .s
+
+You also want:
+
+feasibility assessment
+
+risks/issues
+
+recommendations
+
+a practical plan
+
+2. High-level design choice
+Recommendation in one sentence
+Implement AOT first, and structure it so that a future JIT can reuse the same opcode-lowering logic.
+
+That means:
+
+define a single internal lowering model
+
+write one backend that emits .s
+
+later, optionally write another backend that emits machine words into memory
+
+This gives you a clean separation:
+
+front end: decode p-code and build IR / basic-block info
+
+middle end: analysis and lowering decisions
+
+back ends:
+
+AOT textual assembler emitter
+
+JIT machine-code emitter
+
+3. Feasibility of each option
+A. Interpreter only
+Feasibility
+Very high. You already have it.
+
+Benefits
+simplest
+
+smallest runtime
+
+easiest to debug
+
+best portability for early Pascal evolution
+
+ideal reference semantics
+
+Risks / downsides
+slower dispatch overhead
+
+repeated decode overhead
+
+difficult to compete with native code for hot loops
+
+can mask bad p-code design because everything stays “VM-shaped”
+
+Recommendation
+Keep it forever as the golden reference even if you add AOT/JIT.
+
+B. AOT p-code → COR24 .s
+Feasibility
+High and strongly recommended.
+
+This is the best next step because:
+
+code generation can run on your host today in Rust
+
+output is inspectable .s
+
+you can diff it, test it, single-step it
+
+it fits your existing assembler/linker flow
+
+it can later be reimplemented in C for hosted COR24 use
+
+Benefits
+no runtime codegen memory management needed
+
+much easier debugging than JIT
+
+leverages current assembler/linker
+
+allows incremental implementation
+
+can reuse your existing runtime/ABI ideas
+
+gives a path for Pascal binaries that do not need the VM interpreter at runtime
+
+Risks / downsides
+need to define a real mapping from VM semantics to machine ABI
+
+may expose impedance mismatch between p-code stack semantics and COR24 register model
+
+code size may grow
+
+some VM operations may lower poorly without redesign
+
+Recommendation
+This should be Phase 1.
+
+C. JIT on COR24 itself
+Feasibility
+Possible, but expensive and risky in your environment.
+
+A JIT on a small custom integer-only architecture is not impossible, but it creates hard requirements:
+
+writable/executable code memory model
+
+code cache management
+
+relocations/patching
+
+callout interface between JITted code and runtime helpers
+
+invalidation / cleanup strategy
+
+more RAM pressure
+
+debugging complexity goes way up
+
+Since COR24 is resource-constrained and educational, the JIT likely gives less payoff per unit effort than AOT.
+
+Benefits
+can compile only hot code
+
+can specialize based on runtime conditions
+
+can keep interpreted fallback for rarely used code
+
+interesting as a research/teaching project
+
+Risks / downsides
+runtime memory fragmentation
+
+emitted-code bugs are much harder to diagnose
+
+self-modifying/executable memory issues
+
+generated code must obey exact calling conventions
+
+exception/error handling gets more complex
+
+likely needs a mini linker/relocator anyway
+
+code generation in C on a tiny target is much harder than host-side Rust AOT
+
+Recommendation
+Do not start here.
+
+4. Core architectural issue: what is your p-code model?
+Before deciding JIT vs AOT, the biggest question is:
+
+Is your p-code stack-based, register-like, or mixed?
+This matters because translation difficulty depends heavily on VM shape.
+
+If your p-code is stack-based
+Example: LIT 1; LIT 2; ADD; STORE x
+
+Then AOT/JIT can work, but naive translation may be poor:
+
+lots of stack traffic
+
+many push/pop sequences
+
+harder optimization
+
+code gets verbose
+
+If your p-code has locals/frames plus implicit eval stack
+This is common and still manageable.
+You can:
+
+map top-of-stack to registers
+
+spill deeper stack values to memory
+
+map locals to frame offsets
+
+If your p-code is already closer to a 3-address form
+Then translation gets much easier and better.
+
+5. Recommendation: define a lowering-friendly VM contract
+Before implementing any compiler backend, define these precisely.
+
+A. Runtime memory model
+Specify:
+
+code segment
+
+globals/static data
+
+heap if any
+
+stack(s):
+
+Pascal call stack
+
+VM eval stack, if separate
+
+string/constant pool layout
+
+B. Activation record format
+Define:
+
+return address
+
+old frame pointer
+
+local variables
+
+temporaries
+
+parameters
+
+function result location
+
+If interpreter and AOT/JIT use different frame layouts, life gets harder.
+Best case: define one canonical runtime frame discipline and use it everywhere.
+
+C. Calling convention
+You need to decide:
+
+which COR24 registers are caller-saved
+
+which are callee-saved
+
+where function results go
+
+how runtime helpers are called
+
+how parameters are passed
+
+how VM/AOT/JIT interact
+
+For example, you might reserve:
+
+r0-r2 as scratch / expression registers
+
+fp=r3
+
+sp=r4
+
+z=r5
+
+iv=r6
+
+ir=r7
+
+That likely means AOT/JIT code will have only a few true working registers, so design for a register-starved backend.
+
+D. Error/exception model
+Define what happens for:
+
+divide by zero
+
+nil/invalid pointer
+
+bounds error
+
+illegal opcode
+
+stack overflow
+
+out-of-memory
+
+This matters hugely for generated code.
+
+6. Why AOT first is the right engineering move
+AOT lets you solve the hard parts in a visible way
+With AOT, when p-code block X becomes assembly Y, you can:
+
+inspect generated .s
+
+compare against hand-written .s
+
+assemble and run it
+
+single-step it in your existing debugger
+
+keep the interpreter as oracle
+
+write golden tests on exact emitted assembly patterns if useful
+
+With JIT, when something goes wrong, you must debug:
+
+the input p-code
+
+the compiler logic
+
+the binary emitter
+
+relocation/patching
+
+runtime state
+
+generated code in RAM
+
+That is a much worse first step.
+
+7. Practical implementation strategies
+Strategy 1: direct p-code → .s lowering
+This is the simplest initial AOT design.
+
+Pipeline
+parse p-code
+
+resolve labels / procedures / constants
+
+split into basic blocks
+
+compute stack depth at block boundaries
+
+emit straightforward .s
+
+Pros
+simple
+
+fast to implement
+
+no extra IR required
+
+good for proof of concept
+
+Cons
+optimization opportunities limited
+
+stack discipline can get messy
+
+JIT reuse later is weaker
+
+Good use
+Start here for a small subset.
+
+Strategy 2: p-code → internal IR → .s
+This is what I recommend once you move beyond proof of concept.
+
+Internal IR should capture
+loads/stores
+
+arithmetic ops
+
+branches
+
+calls
+
+frame accesses
+
+constants
+
+abstract stack slots or temporaries
+
+The IR does not need to be fancy. It can be a simple linear three-address-ish form.
+
+Pros
+easier optimization
+
+easier retargeting
+
+much easier later JIT support
+
+simplifies testing
+
+Cons
+more initial work
+
+Recommendation
+Do this after a minimal direct-lowering prototype proves viability.
+
+8. AOT design options
+Option A: translator emits “assembler plus runtime helper calls”
+Example:
+
+arithmetic inlined
+
+complicated operations call runtime routines:
+
+bounds check
+
+string compare
+
+set ops
+
+heap allocation
+
+Pascal I/O
+
+Benefits
+keeps backend small
+
+moves complexity to tested runtime
+
+ideal for a first compiler backend
+
+Risks
+frequent helper calls may limit speed
+
+ABI must be stable
+
+Recommendation
+Best first implementation.
+
+Option B: translator emits highly native code for everything
+Benefits
+faster code
+
+less runtime dependency
+
+Risks
+much more work
+
+much harder to verify
+
+duplicates runtime logic
+
+Recommendation
+Not first.
+
+9. JIT design options
+If you later do a JIT, there are several levels.
+
+Option 1: template/threaded “micro-JIT”
+Each p-code opcode expands to a fixed template of machine code bytes.
+
+Example
+LIT k emits template to load constant
+
+ADD emits template to combine TOS/NOS
+
+LOAD local emits template for frame access
+
+Benefits
+easy compared to optimizing JIT
+
+works well on small ISAs
+
+close cousin of AOT direct lowering
+
+Risks
+code quality mediocre
+
+still need code cache and patching
+
+Recommendation
+This is the only JIT style I would seriously consider early.
+
+Option 2: tracing JIT
+Compile hot loops only.
+
+Benefits
+potentially good payoff
+
+avoids compiling cold code
+
+Risks
+trace recording and side exits are complex
+
+not a great fit for early educational system unless you want that as the research topic
+
+Recommendation
+Later, much later.
+
+Option 3: method/function JIT
+Compile whole p-code procedures.
+
+Benefits
+conceptually simple
+
+easier than tracing
+
+good reuse of AOT backend
+
+Risks
+compile latency may be noticeable on COR24
+
+need memory for compiled procedures
+
+invalidation and caching still required
+
+Recommendation
+If you ever do JIT, this is probably better than tracing.
+
+10. Key potential issues
+10.1 Register starvation on COR24
+You do not have abundant registers.
+
+That means:
+
+expression evaluation must be careful
+
+stack-top caching should be small, perhaps 1–2 virtual stack slots in registers
+
+many temporaries may spill
+
+Recommendation
+Design backend around:
+
+TOS in one register when possible
+
+NOS optionally in another
+
+everything else in frame/eval stack memory
+
+10.2 Code/data memory separation
+Can COR24 safely:
+
+write machine words into memory
+
+then execute them
+
+If yes, JIT is possible.
+If not, JIT becomes much harder or impossible without special loader tricks.
+
+Recommendation
+Verify early:
+
+executable RAM?
+
+any alignment restrictions?
+
+ability to branch/call into generated regions?
+
+relocation assumptions?
+
+10.3 Linking and symbol resolution
+For AOT, .s can use your existing assembler/linker.
+
+For JIT, you need some subset of a linker:
+
+resolve addresses of runtime helpers
+
+patch branches and calls
+
+locate constants/string pools
+
+Recommendation
+This is another reason AOT first wins.
+
+10.4 Pascal semantics that are awkward natively
+Potential pain areas:
+
+nested procedures / static links
+
+sets
+
+strings
+
+variant records
+
+file I/O abstractions
+
+conformant arrays if you go that far
+
+procedure/function variables
+
+Recommendation
+For first native backend, restrict supported features to:
+
+integers
+
+booleans
+
+simple arrays
+
+records
+
+procedures/functions
+
+no fancy strings/sets/files at first unless already runtime-backed cleanly
+
+10.5 Debugging
+Interpreter bugs are easier than generated-code bugs.
+
+Recommendation
+Build debug support into the AOT backend:
+
+emit comments mapping p-code PC to .s
+
+emit labels for procedures and blocks
+
+optionally emit pseudo-source annotations
+
+preserve a p-code-to-native address map
+
+That map later becomes essential for JIT too.
+
+10.6 Self-hosting pressure
+You said it would be nice if the AOT tool could run on COR24 directly.
+
+That is a good long-term goal, but it should not drive the first design too hard.
+
+Recommendation
+Implement in this order:
+
+Rust host AOT
+
+stabilize format and algorithms
+
+reimplement a subset in C for COR24
+
+optionally use same logic for JIT fragments
+
+11. Best hybrid approach
+The most practical architecture is:
+
+Keep three execution modes
+Mode 1: interpreted
+reference semantics
+
+debugging
+
+fallback for unsupported features
+
+Mode 2: AOT compiled
+preferred for production/native execution
+
+built on host first
+
+later maybe available on COR24
+
+Mode 3: optional JIT
+only for experiments or hot code
+
+maybe compile individual procedures
+
+only after AOT is solid
+
+This gives you graceful evolution.
+
+12. Suggested internal compiler architecture
+Front end
+Input:
+
+p-code file / stream
+
+symbol / metadata / constants
+
+Output:
+
+decoded procedures
+
+control-flow graph
+
+stack-depth information
+
+Middle end
+Produce an internal lowered representation:
+
+basic blocks
+
+virtual temporaries
+
+explicit loads/stores
+
+explicit helper calls
+
+explicit branches
+
+Possible simple IR instruction kinds:
+
+Const dst, imm
+
+LoadLocal dst, off
+
+StoreLocal off, src
+
+LoadGlobal dst, sym
+
+StoreGlobal sym, src
+
+BinOp dst, a, b, op
+
+Compare dst, a, b, cond
+
+Jump label
+
+Branch cond, t, f
+
+Call dst?, fn, args
+
+Return src?
+
+StackLoad dst, depth
+
+StackStore depth, src
+
+Back ends
+AOT backend
+emit .s
+
+JIT backend
+emit machine words into memory buffer
+
+Both back ends should consume the same lowered representation if possible.
+
+13. How to start with a minimal AOT subset
+Start with a very narrow subset of p-code.
+
+Phase 0 subset
+Support only:
+
+integer constants
+
+local/global load/store
+
+add/sub/mul
+
+comparisons
+
+conditional/unconditional jumps
+
+procedure call/return
+
+simple stack frame
+
+write integer / basic output helper
+
+Compile trivial Pascal examples:
+
+hello world via runtime helper
+
+arithmetic
+
+loops
+
+recursion
+
+arrays with minimal checking
+
+This is enough to prove the whole path.
+
+14. How to structure the runtime boundary
+Generated code should not try to do everything.
+
+Runtime helper examples
+Use helpers for:
+
+write_int
+
+write_char
+
+new / heap alloc
+
+bounds failure
+
+nil dereference failure
+
+string support
+
+maybe multiply/divide if instruction set makes them awkward
+
+This reduces backend complexity.
+
+15. JIT-specific requirements checklist
+Before you even begin a JIT, verify all of this.
+
+Memory/runtime
+executable RAM available
+
+code cache region defined
+
+constant pool placement defined
+
+branch/call reachability known
+
+Toolchain/runtime
+ability to flush or not need instruction cache
+
+ability to relocate addresses at runtime
+
+runtime helper call ABI stable
+
+Debugging
+generated code dump facility
+
+disassembler or byte dumper
+
+ability to correlate p-code PCs to generated native addresses
+
+Policy
+when to JIT?
+
+all procedures?
+
+hot count threshold?
+
+what if code cache fills?
+
+what if translation fails?
+
+fallback to interpreter
+
+Without these, the JIT will become a swamp.
+
+16. Performance expectations
+AOT
+Likely gives the biggest practical speedup relative to effort, because it removes:
+
+opcode dispatch overhead
+
+repeated decode
+
+some stack shuffling
+
+JIT
+Could outperform AOT only if it does meaningful runtime specialization, but on COR24:
+
+memory is tighter
+
+runtime compile cost matters more
+
+optimization budget is small
+
+So the likely ranking is:
+
+Best effort/benefit: AOT
+
+Best simplicity: interpreter
+
+Best “interesting research project”: JIT
+
+17. Plan I recommend
+Stage 1 — formalize VM/runtime contracts
+Write a short design doc defining:
+
+p-code instruction set semantics
+
+frame layout
+
+calling convention
+
+runtime helper ABI
+
+memory regions
+
+error behavior
+
+Do this first. It will save enormous pain later.
+
+Stage 2 — improve interpreter as reference oracle
+Before codegen:
+
+ensure interpreter is correct
+
+add tracing mode:
+
+p-code PC
+
+stack state
+
+locals/globals touched
+
+add deterministic tests
+
+You will use interpreter-vs-native differential testing.
+
+Stage 3 — host-side Rust AOT prototype
+Implement:
+
+p-code parser
+
+direct lowering for a tiny subset
+
+.s emitter
+
+compile and link with runtime helpers
+
+Target:
+
+simple integer Pascal programs
+
+This proves feasibility fast.
+
+Stage 4 — differential test harness
+For each program:
+
+run under interpreter
+
+run under AOT native
+
+compare:
+
+stdout
+
+exit/result code
+
+final globals if relevant
+
+selected memory snapshots if useful
+
+This is critical.
+
+Stage 5 — add IR and better lowering
+After prototype works:
+
+insert a small IR
+
+add basic block analysis
+
+add stack-depth propagation
+
+add trivial optimizations:
+
+constant folding
+
+dead temp elimination
+
+top-of-stack caching
+
+branch simplification
+
+Stage 6 — broaden Pascal feature coverage
+Add features gradually:
+
+arrays
+
+records
+
+recursion
+
+nested calls
+
+parameter passing variants
+
+heap/runtime ops
+
+Do not try to do all Pascal features at once.
+
+Stage 7 — optional C-hosted AOT on COR24
+After host Rust version stabilizes:
+
+port simplified backend to C
+
+run on COR24
+
+maybe emit .s text or a compact relocatable/native form
+
+At that point you can decide whether emitting text .s on COR24 is actually worth it, or whether a compact binary/native object format is better.
+
+Stage 8 — only then evaluate a JIT
+Reuse as much lowering logic as possible.
+
+Start with:
+
+compile whole p-code procedures
+
+template-based non-optimizing JIT
+
+fallback to interpreter on failure
+
+Do not begin with hot tracing or speculative optimization.
+
+18. Additional recommendation: consider a binary AOT format before self-hosted .s
+You said it would be nice if AOT could run directly on COR24 in C and produce .s.
+
+That is understandable, but for a hosted-on-COR24 compiler, textual .s has costs:
+
+large output size
+
+assembler pass required
+
+string formatting overhead
+
+symbol management overhead
+
+A better long-term self-hosted path may be:
+
+p-code → native object-ish binary
+
+then either:
+
+load directly, or
+
+pass through a minimal relocator/linker
+
+So I would distinguish:
+
+host Rust AOT: emit .s first, because it is easy to debug
+
+future COR24 self-hosted AOT: probably emit a compact binary/native format, not text .s
+
+That can still coexist with the .s backend for debugging.
+
+19. Risks and mitigations
+Risk: p-code too tied to interpreter assumptions
+Mitigation: formalize semantics independent of interpreter internals.
+
+Risk: generated code differs subtly from interpreter
+Mitigation: differential testing with many small programs.
+
+Risk: COR24 lacks enough registers for pleasant codegen
+Mitigation: embrace memory-backed temporaries and tiny stack-top caching.
+
+Risk: JIT memory management becomes dominant complexity
+Mitigation: defer JIT until AOT is mature.
+
+Risk: Pascal feature set explodes backend complexity
+Mitigation: staged feature subsets and helper runtime routines.
+
+Risk: self-hosting becomes premature constraint
+Mitigation: host-first, self-host later.
+
+20. Concrete final recommendations
+Strong recommendation
+Build this in the following order:
+
+Interpreter remains the canonical execution engine
+
+Host-side Rust AOT p-code → .s
+
+Shared lowering model / tiny IR
+
+Optional self-hosted C-based native translator
+
+Optional non-optimizing procedure-level JIT
+
+Do not do first
+full optimizing JIT
+
+tracing JIT
+
+fully self-hosted JIT on COR24 before AOT exists
+
+broad Pascal feature coverage in native backend from day one
+
+First milestone target
+Compile and run this subset natively:
+
+constants
+
+locals
+
+arithmetic
+
+if/while
+
+procedure calls
+
+integer output
+
+If you can do that, the rest becomes an engineering expansion rather than a research mystery.
+
+21. My bottom-line assessment
+Feasibility
+AOT: very feasible, high value
+
+JIT: feasible in principle, but much higher complexity and lower initial payoff
+
+self-hosted AOT in C on COR24: feasible later, but not the first version
+
+self-hosted JIT on COR24: possible, but likely not worth early effort unless the JIT itself is the research goal
+
+Best path
+Your best path is to treat the VM as a specification/reference engine, then build an AOT native backend that gradually replaces the interpreter for programs that fit the supported subset.
+
+Once that exists, a JIT is no longer mysterious: it becomes “the AOT backend, but emitting bytes into memory instead of .s text.”
+
+If you want, I can next sketch a concrete architecture for the AOT translator with:
+
+module breakdown,
+
+IR shape,
+
+frame layout,
+
+calling convention,
+
+and a tiny worked example showing p-code lowered into COR24 .s.
+
+
+naming, packaging, development questions.  Assuming I go with your recommendations, should I start with sw-cor24-x-pcas (for Software Wrighter COR24 ISA Cross-P-Code-Assembler) for the AOT project, and sw-cor24-pcjitc (for Software Wrighter COR24 ISA P-Code JIT Compiler) for the JIT project.  The AOT x-compiler would be in Rust and the JIT would be in C.  How can they share code?  Just extract data structures and psuedocode from Rust to inform C?
+
+You are really deciding three things at once:
+
+product boundaries — what are the tools and runtimes
+
+package boundaries — what lives in which repo/crate/lib
+
+sharing strategy — how Rust host tools and C target-side tools stay aligned without becoming tangled
+
+My recommendation is:
+
+Do not start with two fully separate product names/repositories
+
+Start with one p-code “backend family”
+
+Give the AOT tool the primary identity
+
+Treat the future JIT as a sibling backend/runtime component, not an unrelated project
+
+So I would not lead with sw-cor24-pcjitc as a separate major project yet.
+
+Recommended naming direction
+High-level naming principle
+Use names that reflect the shared domain model first:
+
+COR24
+
+p-code
+
+native/codegen/backend/runtime
+
+Then distinguish:
+
+host AOT translator
+
+runtime/JIT component
+
+Your proposed names are descriptive, but they have some issues.
+
+About sw-cor24-x-pcas
+This is workable, but a bit overloaded:
+
+x- can mean cross, but also reads a little cryptically
+
+pcas reads like “p-code assembler,” which may confuse people because this tool is not just assembling p-code text; it is more like a native code generator / translator
+
+if later it grows beyond .s emission, the name becomes misleading
+
+So I would avoid centering the name on “assembler” unless the tool is literally assembling a textual p-code assembly language.
+
+About sw-cor24-pcjitc
+Technically descriptive, but premature.
+
+The JIT is not your first deliverable, and if it never ships, you will have a named project for a component that may remain experimental.
+
+Better naming options
+Option A: backend-family naming
+This is my preferred approach.
+
+Main project / repo
+sw-cor24-pcode-native
+
+sw-cor24-pcode-backend
+
+sw-cor24-pcode-codegen
+
+Subcomponents inside it
+aot or aotc
+
+jit or jitc
+
+runtime
+
+ir
+
+isa
+
+This is nice because it matches the architecture:
+one shared lowering pipeline, multiple backends.
+
+Example
+Repo:
+
+sw-cor24-pcode-codegen
+
+Packages/modules:
+
+pcir — shared IR/schema
+
+pclower — p-code → lowered form
+
+cgen-cor24 — lowered form → COR24 assembly
+
+aotc — CLI host tool
+
+jitrt — runtime-side JIT support
+
+rthelpers — shared runtime helper ABI docs/impls
+
+That structure scales well.
+
+Option B: keep separate tool names, but with a shared foundation
+If you really want separate end-user tools, do this:
+
+sw-cor24-pcaot or sw-cor24-p2s
+
+sw-cor24-pcjit
+
+But build them on top of a shared spec/foundation repo or package set.
+
+This is acceptable, but I still would not create the JIT project until the AOT path is real.
+
+Option C: tool names tied to function, not implementation detail
+Examples:
+
+sw-pcode2cor24
+
+sw-pcode2s-cor24
+
+sw-cor24-nativegen
+
+sw-cor24-pcode-nativegen
+
+These are easier to understand than acronym-heavy names.
+
+My concrete naming recommendation
+I would use something like this:
+
+Repo / umbrella
+sw-cor24-pcode-codegen
+
+Initial host-side AOT CLI
+sw-pcode2cor24
+
+or
+
+sw-cor24-aotc
+
+Future runtime JIT library/component
+cor24_pcjit as an internal library/component name, not yet a standalone project
+
+This gives you:
+
+one coherent umbrella
+
+a practical tool name for the first deliverable
+
+room for a JIT later without locking yourself into a second premature project
+
+Packaging recommendation
+Start with one repo
+I strongly recommend one repo first, not two repos.
+
+Why:
+
+the AOT and JIT will share semantics
+
+you need one source of truth for opcode meanings, frame layout, helper ABI, and lowering rules
+
+separate repos too early will drift
+
+A good initial layout:
+
+sw-cor24-pcode-codegen/
+  docs/
+    opcode-semantics.md
+    runtime-abi.md
+    frame-layout.md
+    lowering-rules.md
+    jit-notes.md
+
+  rust/
+    crates/
+      pcode-model/
+      pcode-lower/
+      cor24-asm-emitter/
+      pcode-aotc/
+
+  c/
+    include/
+      cor24_pcode_abi.h
+      cor24_pcode_model.h
+    lib/
+      pcjit/
+      pcruntime/
+    tests/
+
+  examples/
+  testdata/
+  golden/
+This is the cleanest way to share intent while allowing different implementation languages.
+
+How can Rust and C share code?
+Short answer
+Do not try to share implementation code first. Share the specification.
+
+Then, only share generated artifacts where that clearly helps.
+
+Your proposed idea:
+
+extract data structures and pseudocode from Rust to inform C
+
+That is directionally right, but too weak if done informally.
+You need something more disciplined than “look at the Rust and port it by hand.”
+
+The right model is:
+
+share formal schemas and docs
+
+share test vectors
+
+optionally generate small common headers/tables
+
+keep actual lowering/codegen implementations separate
+
+Best sharing strategy
+Layer 1: Shared written spec
+This is the most important artifact.
+
+Create stable docs for:
+
+p-code opcode definitions
+
+operand encoding
+
+procedure metadata format
+
+frame layout
+
+runtime helper ABI
+
+error semantics
+
+lowering invariants
+
+This is the real shared codebase, conceptually.
+
+Without this, Rust and C will drift.
+
+Example docs
+opcode-semantics.md
+
+ir-contract.md
+
+runtime-calls.md
+
+cor24-native-calling-convention.md
+
+These should be treated almost like standards documents.
+
+Layer 2: Shared machine-readable schema
+This is the second-best thing to share.
+
+Define the opcode table and metadata in a simple declarative format such as:
+
+JSON
+
+YAML
+
+TOML
+
+or even a custom flat table file
+
+For example:
+
+[[opcode]]
+name = "LIT"
+code = 0x01
+stack_in = 0
+stack_out = 1
+operands = ["imm24"]
+
+[[opcode]]
+name = "ADD"
+code = 0x02
+stack_in = 2
+stack_out = 1
+operands = []
+Then:
+
+Rust can read it
+
+a small generator can emit C headers
+
+docs can be generated from it too
+
+This is much better than duplicating enums by hand.
+
+Layer 3: Generated headers/tables
+This is where real cross-language sharing can happen safely.
+
+From one schema, generate:
+
+Rust enums/constants
+
+C enums/macros/tables
+
+markdown opcode tables
+
+For example:
+
+generated/pcode_opcodes.rs
+
+generated/pcode_opcodes.h
+
+This is excellent for:
+
+opcode numbers
+
+operand kinds
+
+helper IDs
+
+feature flags
+
+error codes
+
+This is much better than trying to translate Rust structs into C mentally.
+
+Layer 4: Shared tests and golden files
+This is probably even more valuable than shared code.
+
+Create test assets like:
+
+p-code input
+
+expected decoded instruction stream
+
+expected stack-effect analysis
+
+expected lowered IR
+
+expected native behavior/output
+
+Then both Rust AOT and C JIT implementations can run the same cases.
+
+Examples:
+
+tests/add_loop_01.pcode
+
+tests/add_loop_01.expected-ir.json
+
+tests/add_loop_01.expected-output.txt
+
+This will keep both implementations aligned.
+
+Layer 5: Optional shared IR serialization
+If useful, define a serialized lowered IR format.
+
+Then:
+
+Rust AOT can emit IR dumps
+
+C-side JIT tests can compare against expected lowered form
+
+later tools can inspect/visualize the pipeline
+
+You do not need this on day one, but it can help a lot.
+
+What not to do
+Do not try to directly share complex implementation logic across Rust and C
+For example:
+
+porting allocator-heavy Rust compiler internals into C
+
+trying to create identical AST/IR implementations by hand
+
+maintaining parallel hand-written opcode tables in both languages
+
+That becomes fragile fast.
+
+Do not use Rust as “the source” and C as “the translation”
+If the C JIT matters, it needs its own proper implementation.
+
+Use Rust as:
+
+the first implementation
+
+a reference for behavior
+
+a producer of generated tables/specs/tests
+
+But not as an informal pseudo-language for C.
+
+Should you extract pseudocode from Rust?
+Yes, but only as design documentation
+That is useful for:
+
+lowering algorithms
+
+register allocation heuristics
+
+stack-depth propagation
+
+block formation
+
+code emission patterns
+
+For example, document:
+
+Stack lowering rule
+For opcode ADD:
+- ensure TOS in v0
+- ensure NOS in v1 or spill slot s0
+- emit add v1, v0
+- result becomes new TOS
+That kind of pseudocode is valuable.
+
+But I would not rely on prose alone. Pair it with:
+
+machine-readable opcode schema
+
+golden tests
+
+ABI docs
+
+A better sharing model than “share code”
+Think of this as sharing five artifacts:
+
+1. Semantic spec
+What the opcode means.
+
+2. ABI spec
+How lowered/generated code interacts with runtime.
+
+3. Declarative tables
+Opcode IDs, operand kinds, helper signatures, flags.
+
+4. Test corpus
+Programs, traces, expected outputs.
+
+5. Diagnostics format
+Debug dumps, trace records, disassembly annotations.
+
+If you share those five, the Rust and C implementations can remain separate and still stay in sync.
+
+Development plan for packaging
+Phase 1 — one repo, Rust-first
+Create one repo with:
+
+docs
+
+schema tables
+
+Rust crates for AOT
+
+placeholder C runtime/JIT directories
+
+shared tests
+
+Do not build the JIT yet.
+
+Phase 2 — stabilize the contracts
+Before C JIT work, make these stable:
+
+opcode numbering
+
+helper calling ABI
+
+frame layout
+
+native function ABI
+
+lowered subset rules
+
+Phase 3 — start C runtime support, not full JIT
+Begin with:
+
+shared helper routines
+
+executable buffer management if needed
+
+patching helpers
+
+code dump/disasm support
+
+This lets you prepare the runtime side without committing to full JIT.
+
+Phase 4 — small JIT proof of concept
+Implement only a tiny subset in C:
+
+integer constants
+
+load/store local
+
+add/sub
+
+branch
+
+return
+
+Use the same test corpus as the Rust AOT path.
+
+Suggested package structure in more detail
+Rust side
+You asked about packaging, so here is a practical split.
+
+pcode-model
+Contains:
+
+opcode definitions
+
+decoded instruction structures
+
+procedure metadata
+
+serialization helpers
+
+pcode-analyze
+Contains:
+
+CFG formation
+
+stack-depth analysis
+
+validation
+
+pcode-lower
+Contains:
+
+lowering from p-code to simple IR
+
+cor24-emit-asm
+Contains:
+
+COR24 assembly emission from lowered IR
+
+pcode-aotc
+CLI tool:
+
+read p-code
+
+run analysis/lowering
+
+emit .s
+
+This keeps responsibilities clean.
+
+C side
+pcode_abi
+Headers:
+
+opcode constants
+
+helper IDs
+
+frame layout constants
+
+pcjit_rt
+Runtime support:
+
+code buffer management
+
+helper-call glue
+
+debug dumping
+
+pcjit_core
+The actual emitter/lowering code for the JIT subset
+
+pcruntime
+Common runtime helpers callable from both interpreted and native code
+
+Repo naming versus crate naming
+Repo name
+Use something broad and durable:
+
+sw-cor24-pcode-codegen
+
+CLI binary name
+Use something task-specific:
+
+sw-pcode2cor24
+
+Internal crate/lib names
+Use short functional names:
+
+pcode_model
+
+pcode_lower
+
+cor24_emit_asm
+
+pcjit_core
+
+This is a nice balance between external clarity and internal simplicity.
+
+About “Software Wrighter” prefixing everywhere
+You can, but I would be selective.
+
+For public repo names and binaries, a short prefix can be fine.
+
+For internal crate/lib names, I would avoid repeating it.
+
+For example:
+
+repo: sw-cor24-pcode-codegen
+
+binary: sw-pcode2cor24
+
+crate: pcode_model
+
+crate: cor24_emit_asm
+
+That keeps code readable.
+
+My concrete recommendation
+I would not start with:
+sw-cor24-x-pcas
+
+sw-cor24-pcjitc
+
+I would start with:
+repo: sw-cor24-pcode-codegen
+
+first tool: sw-pcode2cor24 or sw-cor24-aotc
+
+Then inside that repo:
+
+Rust AOT implementation
+
+shared specs/tables/tests
+
+C runtime/JIT scaffolding
+
+no full standalone JIT project yet
+
+Direct answer to your sharing question
+How can they share code? Just extract data structures and pseudocode from Rust to inform C?
+
+Not just that.
+Use this hierarchy:
+
+Shared semantic docs
+
+Shared machine-readable opcode/schema tables
+
+Generated Rust/C constants and headers
+
+Shared golden tests and sample programs
+
+Shared ABI and diagnostics formats
+
+Only then, pseudocode/design notes for algorithms
+
+That is the most robust way to keep a Rust AOT tool and a C JIT aligned.
+
+Bottom line
+Naming
+Use one umbrella name for the backend family, not two premature standalone tools.
+
+Packaging
+Start in one repo with Rust AOT first and C JIT scaffolding later.
+
+Sharing
+Share specs, schemas, generated tables, ABI docs, and tests.
+Do not try to share complex implementation logic directly between Rust and C.
+
+If you want, I can next lay out a concrete repo tree with:
+
+exact crate names,
+
+exact C library names,
+
+file naming conventions,
+
+and a generated-schema workflow for Rust + C.
+
+
+I have a lot of similar projects all under sw-embed.  They generally start with sw-cor24- (or web-sw-cor24-) to distinguish them from hw- and sw-xxx repos.  I am leaning towards sw-cor24-pc-aotc and sw-cor24-pc-jitc
+
+That naming scheme is reasonable, and with your existing sw-embed conventions, consistency probably matters more than theoretical elegance.
+
+If your repo landscape already trains you to look for:
+
+sw-cor24-* for software targeting the COR24 world
+
+web-sw-cor24-* for browser/UI tools
+
+hw-* for hardware
+
+then sw-cor24-pc-aotc and sw-cor24-pc-jitc are defensible names.
+
+My read on your proposed names
+sw-cor24-pc-aotc
+This reads as:
+
+sw — software
+
+cor24 — target ecosystem / ISA family
+
+pc — p-code
+
+aotc — ahead-of-time compiler
+
+That is pretty clear once you know your house style.
+
+sw-cor24-pc-jitc
+Likewise:
+
+same namespace
+
+same domain
+
+backend distinction at the end
+
+That symmetry is good.
+
+Pros of adopting those names
+1. They fit your existing taxonomy
+That is the biggest win.
+
+A naming scheme is not just about descriptiveness in isolation. It is also about:
+
+grep-ability
+
+tab completion
+
+visual clustering in GitHub
+
+immediate recognition in your own head
+
+If your repos already naturally group as sw-cor24-*, then staying inside that pattern is a real benefit.
+
+2. They leave room for future siblings
+You could later have:
+
+sw-cor24-pc-vm
+
+sw-cor24-pc-rt
+
+sw-cor24-pc-asm
+
+sw-cor24-pc-link
+
+web-sw-cor24-pc-dbg
+
+That is a nice family.
+
+3. They distinguish execution strategy cleanly
+aotc vs jitc is terse but meaningful.
+
+Concerns
+These are not blockers, just things to think through.
+
+1. pc is concise but slightly ambiguous to outsiders
+To you, pc means p-code.
+To others, it might read as:
+
+program counter
+
+personal computer
+
+procedure call
+
+Inside your ecosystem that may not matter much.
+
+Recommendation
+Use the repo names you proposed, but make the README titles explicit, for example:
+
+sw-cor24-pc-aotc — COR24 p-code ahead-of-time compiler
+
+sw-cor24-pc-jitc — COR24 p-code just-in-time compiler/runtime
+
+That solves most ambiguity.
+
+2. jitc may be premature as a standalone repo
+This is the only thing I still think is worth cautioning about.
+
+If you create sw-cor24-pc-jitc now, you may end up with:
+
+one mature AOT repo
+
+one mostly-empty aspirational JIT repo
+
+That is not fatal, but it can create drift.
+
+My actual recommendation
+You have two good options.
+
+Option A — separate repos now
+Use:
+
+sw-cor24-pc-aotc
+
+sw-cor24-pc-jitc
+
+Choose this if you strongly prefer:
+
+clean conceptual separation
+
+independent issue tracking
+
+separate build systems from day one
+
+distinct release cycles
+
+This is viable.
+
+Option B — AOT repo now, JIT repo later
+Start with:
+
+sw-cor24-pc-aotc
+
+Then inside it, keep:
+
+docs for shared opcode semantics
+
+shared tests
+
+shared ABI docs
+
+maybe a jit-notes/ or docs/jit/ area
+
+Create sw-cor24-pc-jitc only when:
+
+AOT semantics stabilize
+
+helper ABI is nailed down
+
+you have real JIT scaffolding to commit
+
+This is the option I would personally favor.
+
+If you do create both, how to keep them aligned
+If you go with two repos, do not rely on “read the Rust and port the idea to C.”
+
+Instead, create a shared contract layer.
+
+Minimum shared artifacts
+At a minimum, both repos should consume or mirror the same:
+
+opcode definitions
+
+operand encodings
+
+frame layout rules
+
+runtime helper ABI
+
+error/trap codes
+
+golden test cases
+
+Best practical way
+Have a third tiny shared-spec repo, or a vendored shared directory pattern.
+
+Example
+sw-cor24-pc-spec
+
+sw-cor24-pc-aotc
+
+sw-cor24-pc-jitc
+
+Where sw-cor24-pc-spec contains:
+
+opcode tables
+
+docs
+
+test vectors
+
+maybe generated headers
+
+That is the cleanest multi-repo design.
+
+If you want to avoid a third repo
+Then I would strongly prefer one repo first.
+
+For example:
+
+Repo
+sw-cor24-pc-aotc
+
+Internal structure
+docs/
+  opcode-semantics.md
+  runtime-abi.md
+  frame-layout.md
+  jit-design-notes.md
+
+rust/
+  ...
+
+c/
+  jit/
+  runtime/
+
+tests/
+spec/
+Then later, if the JIT grows large enough, split it out.
+
+This avoids premature repo multiplication.
+
+Naming details I would standardize
+If you use sw-cor24-pc-aotc and sw-cor24-pc-jitc, I would keep these conventions consistent:
+
+Repo descriptions
+sw-cor24-pc-aotc: Ahead-of-time compiler from COR24 p-code to COR24 native assembly
+
+sw-cor24-pc-jitc: Just-in-time compiler/runtime for executing COR24 p-code as native COR24 code
+
+Binary names
+Maybe shorter than repo names:
+
+pc-aotc
+
+pc-jitc
+
+or:
+
+cor24-pc-aotc
+
+cor24-pc-jitc
+
+Library/module names
+Short, readable internal names:
+
+pc_model
+
+pc_lower
+
+cor24_emit
+
+pcjit_rt
+
+I would not mirror the full repo name inside code identifiers.
+
+How Rust and C should share things
+Your question earlier is still the key one. The answer is:
+
+Share contracts, not implementations
+Share:
+markdown design docs
+
+machine-readable opcode tables
+
+generated constants/headers
+
+golden tests
+
+example p-code programs
+
+expected execution traces where useful
+
+Do not try to share:
+Rust data structures directly
+
+Rust algorithms line-for-line into C
+
+complicated internal compiler logic by manual transliteration
+
+Concrete recommendation based on your conventions
+Given your repo naming habits, I think this is a solid plan:
+
+Immediate plan
+Start with:
+
+sw-cor24-pc-aotc
+
+Inside it include:
+
+docs/opcode-semantics.md
+
+docs/runtime-abi.md
+
+docs/frame-layout.md
+
+docs/jit-plan.md
+
+shared test corpus
+
+Near-future plan
+When the contracts stabilize and you begin real target-side work, create:
+
+sw-cor24-pc-jitc
+
+and seed it from the shared docs/tests/contracts, not from ad hoc Rust-to-C translation.
+
+Bottom line
+Your proposed names are good enough, and in the context of your existing sw-cor24-* ecosystem, I think they are actually a strong choice.
+
+My only adjustment would be about timing, not naming:
+
+Yes to sw-cor24-pc-aotc
+
+Probably later to sw-cor24-pc-jitc, unless you already know you want two repos immediately
+
+If you want, I can sketch a concrete directory layout for sw-cor24-pc-aotc that is set up from day one to make a later split into sw-cor24-pc-jitc painless.
+
+
+
+
+

@@ -1,0 +1,39 @@
+[step]
+name = "014-docs-release"
+status = "pending"
+prompt = """
+Final documentation, cleanup, and release preparation.
+
+1. Update README.md:
+   - Update status from "In development" to current state.
+   - Add usage examples with real commands.
+   - Document supported Pascal features and known limitations.
+   - Add build instructions (cargo build, cargo install).
+
+2. Document the architecture:
+   - Update or expand docs/ with final architecture description.
+   - Document the compilation pipeline with concrete examples.
+   - Document the IR format if IR-based lowering is in use.
+   - Document the runtime helper library and how to extend it.
+
+3. Create CHANGES.md:
+   - Document the development history and major milestones.
+   - List features implemented in each stage.
+
+4. Code cleanup:
+   - Run cargo clippy and fix all warnings.
+   - Run cargo fmt.
+   - Review and clean up any TODO/FIXME comments.
+   - Ensure all public APIs have doc comments.
+   - Remove any dead code or unused dependencies.
+
+5. Release preparation:
+   - Tag a release version (v0.1.0 or similar).
+   - Verify cargo build --release produces a working binary.
+   - Test the binary on a fresh checkout.
+
+6. Update sw-cor24-project status (if such a tracking repo exists)
+   to reflect the AOT compiler's availability.
+
+7. Push to GitHub with all documentation and the release tag.
+"""
