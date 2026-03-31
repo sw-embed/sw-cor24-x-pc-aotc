@@ -1,7 +1,7 @@
-[step]
-name = "001-formalize-contracts"
-status = "pending"
-prompt = """
+number = 1
+slug = "formalize-contracts"
+status = "in-progress"
+description = """
 Document the p-code instruction semantics, activation record layout,
 calling convention, runtime helper ABI, memory regions, and error behavior.
 
@@ -36,3 +36,6 @@ calling convention, runtime helper ABI, memory regions, and error behavior.
    runtime. They must be precise enough that two independent
    implementations can produce compatible code.
 """
+role = "production"
+context_files = []
+created_at = "2026-03-31T01:26:00"

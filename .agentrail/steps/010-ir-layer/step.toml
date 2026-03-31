@@ -1,7 +1,7 @@
-[step]
-name = "010-ir-layer"
+number = 10
+slug = "ir-layer"
 status = "pending"
-prompt = """
+description = """
 Graduate from direct lowering to IR-based lowering. This is the
 transition from Strategy 1 (direct p-code → .s) to Strategy 2
 (p-code → IR → .s) from the research document.
@@ -41,3 +41,6 @@ transition from Strategy 1 (direct p-code → .s) to Strategy 2
 5. Add IR dump mode to pcode-aotc CLI (--dump-ir) for debugging
    and inspection of the lowered form.
 """
+role = "production"
+context_files = []
+created_at = "2026-03-31T01:26:00"

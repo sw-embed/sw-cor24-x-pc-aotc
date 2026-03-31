@@ -1,7 +1,7 @@
-[step]
-name = "013-full-validation"
+number = 13
+slug = "full-validation"
 status = "pending"
-prompt = """
+description = """
 Comprehensive differential testing across the full Pascal test suite.
 Fix any behavioral divergences. Benchmark performance.
 
@@ -36,3 +36,6 @@ Fix any behavioral divergences. Benchmark performance.
    - Cases where behavior diverges from the interpreter by design.
    - Performance characteristics and recommendations.
 """
+role = "production"
+context_files = []
+created_at = "2026-03-31T01:26:00"

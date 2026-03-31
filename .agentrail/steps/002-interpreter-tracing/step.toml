@@ -1,7 +1,7 @@
-[step]
-name = "002-interpreter-tracing"
+number = 2
+slug = "interpreter-tracing"
 status = "pending"
-prompt = """
+description = """
 Add a tracing mode to the p-code interpreter (pv24a) that logs execution
 state for each instruction. This becomes the golden reference for
 differential testing.
@@ -10,27 +10,22 @@ differential testing.
    - For each instruction executed, log: p-code PC, opcode, operands,
      stack state (top N values), current frame pointer, locals/globals
      touched.
-   - Output format should be deterministic and diff-friendly (one line
-     per instruction, fixed-width fields or structured text).
-   - Tracing should be toggleable via a command-line flag (e.g., -t or
-     --trace).
+   - Output format should be deterministic and diff-friendly.
+   - Tracing should be toggleable via a command-line flag (e.g., -t).
 
 2. Create deterministic test programs in Pascal:
-   - arithmetic.pas: integer arithmetic, operator precedence
-   - locals.pas: local variable read/write
-   - if_else.pas: conditional branching
-   - while_loop.pas: simple while loop with counter
-   - procedure_call.pas: procedure call and return, parameters
-   - recursion.pas: recursive factorial or fibonacci
-   - Store these in tests/pascal/ in this repo (or a shared location).
+   - arithmetic.pas, locals.pas, if_else.pas, while_loop.pas,
+     procedure_call.pas, recursion.pas
+   - Store these in tests/pascal/ in this repo.
 
 3. Compile each test program with p24p, run under pv24a with tracing
    enabled, and save the trace output as golden files.
 
 4. The trace format should capture enough state that the AOT compiler's
-   output can be validated instruction-by-instruction, not just by
-   final output comparison.
+   output can be validated instruction-by-instruction.
 
 Note: This step requires changes to sw-cor24-pcode, not this repo.
-Coordinate with that repo's conventions.
 """
+role = "production"
+context_files = []
+created_at = "2026-03-31T01:26:00"

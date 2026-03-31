@@ -1,7 +1,7 @@
-[step]
-name = "012-heap-runtime"
+number = 12
+slug = "heap-runtime"
 status = "pending"
-prompt = """
+description = """
 Add heap allocation, string operations, set operations, and remaining
 runtime helpers.
 
@@ -36,3 +36,6 @@ runtime helpers.
    - Mixed programs combining heap, strings, and arithmetic.
    - All must pass differential testing.
 """
+role = "production"
+context_files = []
+created_at = "2026-03-31T01:26:00"

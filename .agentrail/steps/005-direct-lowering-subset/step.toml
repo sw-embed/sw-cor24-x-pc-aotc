@@ -1,7 +1,7 @@
-[step]
-name = "005-direct-lowering-subset"
+number = 5
+slug = "direct-lowering-subset"
 status = "pending"
-prompt = """
+description = """
 Implement direct p-code to .s translation for a tiny subset of opcodes.
 This is the proof-of-concept that validates the whole pipeline.
 
@@ -44,3 +44,6 @@ This is the proof-of-concept that validates the whole pipeline.
 6. The generated .s must assemble cleanly with the cross-assembler
    (sw-cor24-x-assembler) and produce correct results on the emulator.
 """
+role = "production"
+context_files = []
+created_at = "2026-03-31T01:26:00"

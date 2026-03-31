@@ -1,7 +1,7 @@
-[step]
-name = "011-optimizations"
+number = 11
+slug = "optimizations"
 status = "pending"
-prompt = """
+description = """
 Implement basic optimizations on the IR to improve generated code quality.
 
 1. Constant folding:
@@ -35,3 +35,6 @@ Implement basic optimizations on the IR to improve generated code quality.
 6. Optimizations must be individually toggleable via CLI flags for
    debugging (e.g., --no-opt, --opt-fold, --opt-dce, --opt-tos-cache).
 """
+role = "production"
+context_files = []
+created_at = "2026-03-31T01:26:00"

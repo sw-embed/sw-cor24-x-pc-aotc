@@ -1,7 +1,7 @@
-[step]
-name = "007-differential-testing"
+number = 7
+slug = "differential-testing"
 status = "pending"
-prompt = """
+description = """
 Build the differential test harness that validates AOT output against
 the interpreter.
 
@@ -39,3 +39,6 @@ the interpreter.
 5. This harness is the primary quality gate for all future development.
    Every new opcode or feature must pass differential testing.
 """
+role = "production"
+context_files = []
+created_at = "2026-03-31T01:26:00"

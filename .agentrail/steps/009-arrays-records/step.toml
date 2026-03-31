@@ -1,7 +1,7 @@
-[step]
-name = "009-arrays-records"
+number = 9
+slug = "arrays-records"
 status = "pending"
-prompt = """
+description = """
 Add lowering for Pascal arrays and records.
 
 1. Array support:
@@ -33,3 +33,6 @@ Add lowering for Pascal arrays and records.
    - Pass array/record as parameter.
    - All must pass differential testing against interpreter.
 """
+role = "production"
+context_files = []
+created_at = "2026-03-31T01:26:00"
