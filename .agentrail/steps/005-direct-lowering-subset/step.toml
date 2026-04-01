@@ -1,6 +1,6 @@
 number = 5
 slug = "direct-lowering-subset"
-status = "pending"
+status = "in-progress"
 description = """
 Implement direct p-code to .s translation for a tiny subset of opcodes.
 This is the proof-of-concept that validates the whole pipeline.

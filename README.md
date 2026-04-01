@@ -16,7 +16,10 @@ translate at runtime on the target hardware.
 
 ## Status
 
-**In development** — project scaffolding and planning phase.
+**In development** — direct lowering for core p-code subset implemented.
+P-code decoder complete; assembly emitter handles stack ops, arithmetic,
+comparisons, control flow, frame setup, and local/global variable access.
+CLI reads `.p24` files and writes `.s` assembly output.
 
 ## Naming Convention
 

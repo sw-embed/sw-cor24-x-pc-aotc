@@ -1,6 +1,6 @@
 number = 4
 slug = "pcode-decoder"
-status = "in-progress"
+status = "completed"
 description = """
 Implement p-code file parsing and instruction decoding in pcode-model.
 
@@ -34,3 +34,4 @@ and pv24a's loader in sw-cor24-pcode.
 role = "production"
 context_files = []
 created_at = "2026-03-31T01:26:00"
+completed_at = "2026-04-01T05:12:52"
