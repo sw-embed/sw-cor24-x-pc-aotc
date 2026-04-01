@@ -161,6 +161,7 @@ fn extract_procedures(instructions: &[Instruction]) -> Vec<ProcedureInfo> {
             procedures.push(ProcedureInfo {
                 entry_pc: instr.pc,
                 num_locals,
+                nargs: None,
                 instr_start: idx,
                 instr_end: 0, // will be filled in
             });
@@ -171,6 +172,18 @@ fn extract_procedures(instructions: &[Instruction]) -> Vec<ProcedureInfo> {
     if let Some(last) = procedures.last_mut() {
         if last.instr_end == 0 {
             last.instr_end = instructions.len();
+        }
+    }
+
+    // Scan each procedure for `ret` to extract nargs
+    for proc in &mut procedures {
+        for instr in &instructions[proc.instr_start..proc.instr_end] {
+            if instr.op == Opcode::Ret {
+                if let Operand::Imm8(n) = instr.operand {
+                    proc.nargs = Some(n);
+                }
+                break;
+            }
         }
     }
 
@@ -350,11 +363,13 @@ mod tests {
         assert_eq!(prog.procedures.len(), 2);
         assert_eq!(prog.procedures[0].entry_pc, 0);
         assert_eq!(prog.procedures[0].num_locals, 1);
+        assert_eq!(prog.procedures[0].nargs, Some(0));
         assert_eq!(prog.procedures[0].instr_start, 0);
         assert_eq!(prog.procedures[0].instr_end, 3); // up to (not including) proc 1's enter
 
         assert_eq!(prog.procedures[1].entry_pc, 5);
         assert_eq!(prog.procedures[1].num_locals, 3);
+        assert_eq!(prog.procedures[1].nargs, Some(0));
         assert_eq!(prog.procedures[1].instr_start, 3);
         assert_eq!(prog.procedures[1].instr_end, 6);
     }

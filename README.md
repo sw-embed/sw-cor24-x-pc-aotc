@@ -18,8 +18,12 @@ translate at runtime on the target hardware.
 
 **In development** — direct lowering for core p-code subset implemented.
 P-code decoder complete; assembly emitter handles stack ops, arithmetic,
-comparisons, control flow, frame setup, and local/global variable access.
-CLI reads `.p24` files and writes `.s` assembly output.
+comparisons, control flow, frame setup, local/global variable access,
+procedure calls with parameter passing, return values, system calls
+(UART I/O), signed integer division/modulo, bitwise operations, and
+indirect memory access. Runtime library procedures (write_int, writeln,
+etc.) compile through the AOT pipeline. CLI reads `.p24` files and
+writes `.s` assembly output.
 
 ## Naming Convention
 

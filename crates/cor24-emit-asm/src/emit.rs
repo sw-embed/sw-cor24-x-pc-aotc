@@ -1,5 +1,5 @@
-use pcode_model::{Instruction, Opcode, Operand, Program, WORD};
-use std::collections::HashSet;
+use pcode_model::{Instruction, Opcode, Operand, Program, SysCall, WORD};
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
 /// Errors during assembly emission.
@@ -11,6 +11,8 @@ pub enum EmitError {
     GlobalOffsetTooLarge { addr: u32 },
     /// Local variable offset too large for single-instruction access.
     LocalOffsetTooLarge { offset: u8 },
+    /// Argument access without known nargs for the containing procedure.
+    UnknownNargs { pc: u32 },
 }
 
 impl std::fmt::Display for EmitError {
@@ -22,6 +24,12 @@ impl std::fmt::Display for EmitError {
             }
             EmitError::LocalOffsetTooLarge { offset } => {
                 write!(f, "local offset too large: {offset} (max 41)")
+            }
+            EmitError::UnknownNargs { pc } => {
+                write!(
+                    f,
+                    "loada/storea at PC=0x{pc:04X} but containing procedure has unknown nargs"
+                )
             }
         }
     }
@@ -38,6 +46,9 @@ impl From<std::fmt::Error> for EmitError {
 /// Initial stack pointer address. Programs start with sp set here;
 /// the stack grows downward from this address.
 const STACK_TOP: u32 = 0x2000;
+
+/// Frame header size in bytes: return address (3) + old fp (3).
+const FRAME_HEADER: usize = 6;
 
 /// Emit COR24 assembly for a decoded p-code program.
 ///
@@ -61,14 +72,40 @@ struct Emitter {
     targets: HashSet<u32>,
     /// Counter for generating unique skip labels (for conditional branches).
     skip_id: u32,
+    /// Map from procedure entry PC to procedure info (nargs, num_locals).
+    proc_info: HashMap<u32, ProcInfo>,
+    /// Current procedure's info (set when we encounter an `enter`).
+    current_proc: Option<ProcInfo>,
+    /// Whether the _p24_divmod helper is needed.
+    needs_divmod: bool,
+}
+
+/// Minimal procedure info carried by the emitter.
+#[derive(Debug, Clone, Copy)]
+struct ProcInfo {
+    nargs: u8,
+    num_locals: u8,
 }
 
 impl Emitter {
     fn new(program: &Program) -> Self {
+        let mut proc_info = HashMap::new();
+        for p in &program.procedures {
+            proc_info.insert(
+                p.entry_pc,
+                ProcInfo {
+                    nargs: p.nargs.unwrap_or(0),
+                    num_locals: p.num_locals,
+                },
+            );
+        }
         Self {
             out: String::with_capacity(8192),
             targets: collect_branch_targets(&program.instructions),
             skip_id: 0,
+            proc_info,
+            current_proc: None,
+            needs_divmod: false,
         }
     }
 
@@ -98,6 +135,11 @@ impl Emitter {
         writeln!(self.out, "_p24_halt:")?;
         writeln!(self.out, "    bra     _p24_halt")?;
         writeln!(self.out)?;
+
+        // Emit divmod helper if needed
+        if self.needs_divmod {
+            self.emit_divmod_helper()?;
+        }
 
         // Global variable storage
         if program.global_count > 0 {
@@ -137,6 +179,11 @@ impl Emitter {
             writeln!(self.out, ".L{:04X}:", instr.pc)?;
         }
 
+        // Track current procedure when we see enter
+        if instr.op == Opcode::Enter {
+            self.current_proc = self.proc_info.get(&instr.pc).copied();
+        }
+
         // Comment with p-code disassembly
         self.pcode_comment(instr)?;
 
@@ -154,7 +201,17 @@ impl Emitter {
             Opcode::Add => self.op_commutative_binop("add")?,
             Opcode::Sub => self.op_sub()?,
             Opcode::Mul => self.op_commutative_binop("mul")?,
+            Opcode::Div => self.op_div()?,
+            Opcode::Mod => self.op_mod()?,
             Opcode::Neg => self.op_neg()?,
+
+            // Bitwise
+            Opcode::And => self.op_commutative_binop("and")?,
+            Opcode::Or => self.op_commutative_binop("or")?,
+            Opcode::Xor => self.op_commutative_binop("xor")?,
+            Opcode::Not => self.op_not()?,
+            Opcode::Shl => self.op_shift("shl")?,
+            Opcode::Shr => self.op_shift("sra")?,
 
             // Comparisons
             Opcode::Eq => self.op_eq()?,
@@ -168,6 +225,10 @@ impl Emitter {
             Opcode::Jmp => self.op_jmp(instr)?,
             Opcode::Jz => self.op_jz(instr)?,
             Opcode::Jnz => self.op_jnz(instr)?,
+            Opcode::Call => self.op_call(instr)?,
+            Opcode::Calln => self.op_calln(instr)?,
+            Opcode::Ret => self.op_ret(instr)?,
+            Opcode::Trap => self.op_trap(instr)?,
 
             // Frame / variable access
             Opcode::Enter => self.op_enter(instr)?,
@@ -176,6 +237,21 @@ impl Emitter {
             Opcode::Storel => self.op_storel(instr)?,
             Opcode::Loadg => self.op_loadg(instr)?,
             Opcode::Storeg => self.op_storeg(instr)?,
+            Opcode::Loada => self.op_loada(instr)?,
+            Opcode::Storea => self.op_storea(instr)?,
+
+            // Address-of operations
+            Opcode::Addrl => self.op_addrl(instr)?,
+            Opcode::Addrg => self.op_addrg(instr)?,
+
+            // Indirect memory access
+            Opcode::Load => self.op_load()?,
+            Opcode::Store => self.op_store()?,
+            Opcode::Loadb => self.op_loadb()?,
+            Opcode::Storeb => self.op_storeb()?,
+
+            // System calls
+            Opcode::Sys => self.op_sys(instr)?,
 
             // Unsupported — emit a comment so the file is still parseable
             _ => {
@@ -240,7 +316,7 @@ impl Emitter {
 
     // ── Arithmetic ─────────────────────────────────────────────────
 
-    /// Emit a commutative binary op (add, mul): pop two, compute, push result.
+    /// Emit a commutative binary op (add, mul, and, or, xor): pop two, compute, push result.
     fn op_commutative_binop(&mut self, mnemonic: &str) -> Result<(), EmitError> {
         writeln!(self.out, "    pop     r0")?; // TOS
         writeln!(self.out, "    pop     r1")?; // NOS
@@ -264,6 +340,56 @@ impl Emitter {
         writeln!(self.out, "    mov     r0, z")?; // r0 = 0
         writeln!(self.out, "    sub     r0, r1")?; // r0 = 0 - TOS
         writeln!(self.out, "    push    r0")?;
+        Ok(())
+    }
+
+    /// Not: ~TOS (bitwise complement). Compute TOS XOR 0xFFFFFF.
+    fn op_not(&mut self) -> Result<(), EmitError> {
+        writeln!(self.out, "    pop     r0")?;
+        writeln!(self.out, "    la      r1, -1")?; // 0xFFFFFF
+        writeln!(self.out, "    xor     r0, r1")?;
+        writeln!(self.out, "    push    r0")?;
+        Ok(())
+    }
+
+    /// Shift: shl or sra (arithmetic shift right). NOS shifted by TOS amount.
+    fn op_shift(&mut self, mnemonic: &str) -> Result<(), EmitError> {
+        writeln!(self.out, "    pop     r1")?; // TOS = shift amount
+        writeln!(self.out, "    pop     r0")?; // NOS = value
+        writeln!(self.out, "    {mnemonic:<8}r0, r1")?;
+        writeln!(self.out, "    push    r0")?;
+        Ok(())
+    }
+
+    /// Div: NOS / TOS (signed integer division). Calls _p24_divmod helper.
+    /// _p24_divmod: r0=dividend, r1=divisor, return addr on stack.
+    /// Returns: r0=quotient, r1=remainder.
+    fn op_div(&mut self) -> Result<(), EmitError> {
+        self.needs_divmod = true;
+        let skip = self.next_skip();
+        writeln!(self.out, "    pop     r1")?; // TOS = divisor
+        writeln!(self.out, "    pop     r0")?; // NOS = dividend
+        writeln!(self.out, "    la      r2, .Ldiv_ret{skip}")?;
+        writeln!(self.out, "    push    r2")?; // push return address
+        writeln!(self.out, "    la      r2, _p24_divmod")?;
+        writeln!(self.out, "    jmp     (r2)")?;
+        writeln!(self.out, ".Ldiv_ret{skip}:")?;
+        writeln!(self.out, "    push    r0")?; // push quotient
+        Ok(())
+    }
+
+    /// Mod: NOS % TOS (signed modulo). Calls _p24_divmod helper.
+    fn op_mod(&mut self) -> Result<(), EmitError> {
+        self.needs_divmod = true;
+        let skip = self.next_skip();
+        writeln!(self.out, "    pop     r1")?; // TOS = divisor
+        writeln!(self.out, "    pop     r0")?; // NOS = dividend
+        writeln!(self.out, "    la      r2, .Lmod_ret{skip}")?;
+        writeln!(self.out, "    push    r2")?; // push return address
+        writeln!(self.out, "    la      r2, _p24_divmod")?;
+        writeln!(self.out, "    jmp     (r2)")?;
+        writeln!(self.out, ".Lmod_ret{skip}:")?;
+        writeln!(self.out, "    push    r1")?; // push remainder
         Ok(())
     }
 
@@ -378,22 +504,121 @@ impl Emitter {
         Ok(())
     }
 
+    /// Call procedure (flat call, no static link depth).
+    ///
+    /// Uses `jal r1, (r2)` to set r1 = return address and jump.
+    /// The callee's `enter` will save r1 as part of the frame header.
+    fn op_call(&mut self, instr: &Instruction) -> Result<(), EmitError> {
+        if let Operand::Imm24(addr) = instr.operand {
+            writeln!(self.out, "    la      r2, .L{addr:04X}")?;
+            writeln!(self.out, "    jal     r1, (r2)")?;
+        }
+        Ok(())
+    }
+
+    /// Call with explicit static link depth (for nested procedures).
+    /// Currently emits the same as flat call (static link not yet used).
+    fn op_calln(&mut self, instr: &Instruction) -> Result<(), EmitError> {
+        if let Operand::D8A24 { addr, .. } = instr.operand {
+            writeln!(self.out, "    la      r2, .L{addr:04X}")?;
+            writeln!(self.out, "    jal     r1, (r2)")?;
+        }
+        Ok(())
+    }
+
+    /// Return from procedure, clean nargs.
+    ///
+    /// Frame layout (stack grows down):
+    /// ```text
+    ///     [argN-1]  ← fp + 6
+    ///     ...
+    ///     [arg0]    ← fp + 6 + (nargs-1)*3
+    ///     [ret_addr] ← fp + 3
+    ///     [old_fp]   ← fp + 0
+    ///     [local0]   ← fp - 3
+    ///     ...
+    ///     [eval...]  ← sp
+    /// ```
+    ///
+    /// For procedures (no return value): discard frame and args, jump back.
+    /// For functions: save TOS (return value) in r0, restore, push back.
+    fn op_ret(&mut self, instr: &Instruction) -> Result<(), EmitError> {
+        if let Operand::Imm8(nargs) = instr.operand {
+            // Detect if there's a return value by checking if eval stack
+            // is non-empty relative to locals. We use a dynamic check:
+            // if sp < fp - num_locals*3, there's something on the eval stack.
+            let num_locals = self.current_proc.map(|p| p.num_locals).unwrap_or(0);
+            let locals_bytes = num_locals as i32 * WORD as i32;
+
+            let skip = self.next_skip();
+
+            // r2 = fp - locals_bytes = bottom of locals (expected empty sp)
+            writeln!(self.out, "    mov     r2, fp")?;
+            if locals_bytes > 0 {
+                writeln!(self.out, "    sub     r2, {locals_bytes}")?;
+            }
+            // Compare: is sp below the expected empty position?
+            // If sp < r2, there's a return value on the eval stack.
+            // COR24: cls sets C = (ra < rb) signed
+            // But we can't use sp directly in cls. Copy sp to r0.
+            writeln!(self.out, "    mov     r0, sp")?;
+            writeln!(self.out, "    cls     r0, r2")?; // C = (sp < expected)
+            writeln!(self.out, "    brf     .Lret_noval{skip}")?; // skip if no retval
+
+            // Has return value: save it
+            writeln!(self.out, "    pop     r0")?; // r0 = return value
+            writeln!(self.out, "    mov     sp, fp")?; // discard locals
+            writeln!(self.out, "    pop     fp")?; // restore fp
+            writeln!(self.out, "    pop     r2")?; // r2 = return address
+            if nargs > 0 {
+                let arg_bytes = nargs as u32 * WORD as u32;
+                writeln!(self.out, "    add     sp, {arg_bytes}")?;
+            }
+            writeln!(self.out, "    push    r0")?; // push return value
+            writeln!(self.out, "    jmp     (r2)")?; // return
+
+            // No return value path
+            writeln!(self.out, ".Lret_noval{skip}:")?;
+            writeln!(self.out, "    mov     sp, fp")?;
+            writeln!(self.out, "    pop     fp")?;
+            writeln!(self.out, "    pop     r2")?;
+            if nargs > 0 {
+                let arg_bytes = nargs as u32 * WORD as u32;
+                writeln!(self.out, "    add     sp, {arg_bytes}")?;
+            }
+            writeln!(self.out, "    jmp     (r2)")?;
+        }
+        Ok(())
+    }
+
+    /// Trap: enter halt loop (simplified — full trap handling is future work).
+    fn op_trap(&mut self, _instr: &Instruction) -> Result<(), EmitError> {
+        writeln!(self.out, "    la      r2, _p24_halt")?;
+        writeln!(self.out, "    jmp     (r2)")?;
+        Ok(())
+    }
+
     // ── Frame / variable access ────────────────────────────────────
 
     /// Enter: set up activation frame, allocate local variable slots.
     ///
+    /// Saves r1 (return address from `jal`) and old fp, then sets fp and
+    /// allocates locals.
+    ///
     /// Frame layout (stack grows downward):
     /// ```text
-    ///     [saved fp]    ← fp points here after "mov fp, sp"
-    ///     [local 0]     ← fp - 3
-    ///     [local 1]     ← fp - 6
+    ///     [ret_addr]  ← fp + 3  (r1 from jal, or garbage for main)
+    ///     [old_fp]    ← fp + 0
+    ///     [local 0]   ← fp - 3
+    ///     [local 1]   ← fp - 6
     ///     ...
-    ///     [local N-1]   ← fp - N*3
-    ///     [eval stack]  ← sp (current top)
+    ///     [local N-1] ← fp - N*3
+    ///     [eval stack] ← sp (current top)
     /// ```
     fn op_enter(&mut self, instr: &Instruction) -> Result<(), EmitError> {
         if let Operand::Imm8(nlocals) = instr.operand {
-            writeln!(self.out, "    push    fp")?;
+            writeln!(self.out, "    push    r1")?; // save return address
+            writeln!(self.out, "    push    fp")?; // save old frame pointer
             writeln!(self.out, "    mov     fp, sp")?;
             if nlocals > 0 {
                 let size = nlocals as u32 * WORD as u32;
@@ -404,9 +629,12 @@ impl Emitter {
     }
 
     /// Leave: tear down activation frame (inverse of enter).
+    /// In practice, `leave` is dead code after `ret` in p-code programs.
+    /// It's emitted for completeness but typically never reached.
     fn op_leave(&mut self) -> Result<(), EmitError> {
         writeln!(self.out, "    mov     sp, fp")?;
         writeln!(self.out, "    pop     fp")?;
+        writeln!(self.out, "    pop     r1")?; // discard saved return address
         Ok(())
     }
 
@@ -464,6 +692,142 @@ impl Emitter {
         Ok(())
     }
 
+    /// Load argument at index onto eval stack.
+    ///
+    /// Arguments are above the frame header on the stack:
+    /// `arg[idx]` is at `fp + FRAME_HEADER + (nargs - 1 - idx) * 3`.
+    fn op_loada(&mut self, instr: &Instruction) -> Result<(), EmitError> {
+        if let Operand::Imm8(idx) = instr.operand {
+            let nargs = self
+                .current_proc
+                .map(|p| p.nargs)
+                .ok_or(EmitError::UnknownNargs { pc: instr.pc })?;
+            let offset = arg_frame_offset(nargs, idx);
+            writeln!(self.out, "    lw      r0, {offset}(fp)")?;
+            writeln!(self.out, "    push    r0")?;
+        }
+        Ok(())
+    }
+
+    /// Store TOS into argument at index.
+    fn op_storea(&mut self, instr: &Instruction) -> Result<(), EmitError> {
+        if let Operand::Imm8(idx) = instr.operand {
+            let nargs = self
+                .current_proc
+                .map(|p| p.nargs)
+                .ok_or(EmitError::UnknownNargs { pc: instr.pc })?;
+            let offset = arg_frame_offset(nargs, idx);
+            writeln!(self.out, "    pop     r0")?;
+            writeln!(self.out, "    sw      r0, {offset}(fp)")?;
+        }
+        Ok(())
+    }
+
+    // ── Address-of operations ──────────────────────────────────────
+
+    /// Push address of local variable at slot offset.
+    fn op_addrl(&mut self, instr: &Instruction) -> Result<(), EmitError> {
+        if let Operand::Imm8(slot) = instr.operand {
+            let offset = local_frame_offset(slot)?;
+            // addr = fp + offset (offset is negative)
+            writeln!(self.out, "    mov     r0, fp")?;
+            writeln!(self.out, "    add     r0, {offset}")?;
+            writeln!(self.out, "    push    r0")?;
+        }
+        Ok(())
+    }
+
+    /// Push address of global variable at word offset.
+    fn op_addrg(&mut self, instr: &Instruction) -> Result<(), EmitError> {
+        if let Operand::Imm24(addr) = instr.operand {
+            let byte_offset = addr as usize * WORD;
+            writeln!(self.out, "    la      r0, _p24_globals")?;
+            if byte_offset > 0 {
+                if byte_offset <= 127 {
+                    writeln!(self.out, "    add     r0, {byte_offset}")?;
+                } else {
+                    writeln!(self.out, "    la      r1, {byte_offset}")?;
+                    writeln!(self.out, "    add     r0, r1")?;
+                }
+            }
+            writeln!(self.out, "    push    r0")?;
+        }
+        Ok(())
+    }
+
+    // ── Indirect memory access ─────────────────────────────────────
+
+    /// Load word from address on stack. ( addr -- val )
+    fn op_load(&mut self) -> Result<(), EmitError> {
+        writeln!(self.out, "    pop     r1")?; // addr
+        writeln!(self.out, "    lw      r0, 0(r1)")?;
+        writeln!(self.out, "    push    r0")?;
+        Ok(())
+    }
+
+    /// Store word to address on stack. ( val addr -- )
+    fn op_store(&mut self) -> Result<(), EmitError> {
+        writeln!(self.out, "    pop     r1")?; // addr
+        writeln!(self.out, "    pop     r0")?; // val
+        writeln!(self.out, "    sw      r0, 0(r1)")?;
+        Ok(())
+    }
+
+    /// Load byte (zero-extended) from address. ( addr -- byte )
+    fn op_loadb(&mut self) -> Result<(), EmitError> {
+        writeln!(self.out, "    pop     r1")?; // addr
+        writeln!(self.out, "    lbu     r0, 0(r1)")?;
+        writeln!(self.out, "    push    r0")?;
+        Ok(())
+    }
+
+    /// Store byte to address. ( byte addr -- )
+    fn op_storeb(&mut self) -> Result<(), EmitError> {
+        writeln!(self.out, "    pop     r1")?; // addr
+        writeln!(self.out, "    pop     r0")?; // byte
+        writeln!(self.out, "    sb      r0, 0(r1)")?;
+        Ok(())
+    }
+
+    // ── System calls ───────────────────────────────────────────────
+
+    fn op_sys(&mut self, instr: &Instruction) -> Result<(), EmitError> {
+        if let Operand::Imm8(id) = instr.operand {
+            match SysCall::from_id(id) {
+                Some(SysCall::Halt) => {
+                    writeln!(self.out, "    la      r2, _p24_halt")?;
+                    writeln!(self.out, "    jmp     (r2)")?;
+                }
+                Some(SysCall::Putc) => {
+                    let skip = self.next_skip();
+                    writeln!(self.out, "    pop     r0")?; // char to write
+                    writeln!(self.out, "    la      r1, 0xFF0100")?; // UART base
+                    writeln!(self.out, ".Lputc{skip}:")?;
+                    writeln!(self.out, "    lb      r2, 1(r1)")?; // read status
+                    writeln!(self.out, "    cls     r2, z")?; // C = (status < 0) = TX busy
+                    writeln!(self.out, "    brt     .Lputc{skip}")?; // wait if busy
+                    writeln!(self.out, "    sb      r0, 0(r1)")?; // write char
+                }
+                Some(SysCall::Getc) => {
+                    let skip = self.next_skip();
+                    writeln!(self.out, "    la      r1, 0xFF0100")?; // UART base
+                    writeln!(self.out, ".Lgetc{skip}:")?;
+                    writeln!(self.out, "    lbu     r2, 1(r1)")?; // read status (unsigned)
+                    writeln!(self.out, "    lc      r0, 1")?; // RX ready mask
+                    writeln!(self.out, "    and     r2, r0")?; // isolate bit 0
+                    writeln!(self.out, "    ceq     r2, z")?; // C = (no data)
+                    writeln!(self.out, "    brt     .Lgetc{skip}")?; // wait if not ready
+                    writeln!(self.out, "    lbu     r0, 0(r1)")?; // read char
+                    writeln!(self.out, "    push    r0")?;
+                }
+                _ => {
+                    writeln!(self.out, "    ; TODO: unsupported sys call {id}")?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     // ── Helpers ────────────────────────────────────────────────────
 
     /// Emit a p-code disassembly comment line.
@@ -484,6 +848,105 @@ impl Emitter {
         }
         Ok(())
     }
+
+    /// Emit the signed integer division/modulo helper routine.
+    ///
+    /// Entry: r0 = dividend, r1 = divisor
+    /// Exit:  r0 = quotient, r1 = remainder
+    /// Uses:  r2 as scratch, hardware stack for temporaries
+    /// Link:  returns via `jmp (r2)` where r2 was set by inline return label
+    ///
+    /// Algorithm: repeated subtraction with sign handling.
+    /// For correctness: quotient truncates toward zero, remainder has sign of dividend.
+    fn emit_divmod_helper(&mut self) -> Result<(), EmitError> {
+        writeln!(self.out, "; Signed integer division/modulo helper")?;
+        writeln!(self.out, "; Entry: r0 = dividend, r1 = divisor")?;
+        writeln!(self.out, "; Exit:  r0 = quotient, r1 = remainder")?;
+        writeln!(self.out, "; Link:  pop return address from stack, jmp (r2)")?;
+        writeln!(self.out, "_p24_divmod:")?;
+
+        // Trap on division by zero
+        writeln!(self.out, "    ceq     r1, z")?;
+        writeln!(self.out, "    brf     .Ldm_ok")?;
+        writeln!(self.out, "    la      r2, _p24_halt")?;
+        writeln!(self.out, "    jmp     (r2)")?;
+        writeln!(self.out, ".Ldm_ok:")?;
+
+        // Save signs. We'll compute |dividend| / |divisor| then fix signs.
+        // Push sign flags: bit pattern where bit 0 = negate quotient
+        writeln!(self.out, "    push    r0")?; // save dividend for sign check later
+        writeln!(self.out, "    push    r1")?; // save divisor for sign check later
+
+        // Make dividend positive
+        writeln!(self.out, "    cls     r0, z")?; // C = (dividend < 0)
+        writeln!(self.out, "    brf     .Ldm_dpos")?;
+        writeln!(self.out, "    mov     r2, z")?;
+        writeln!(self.out, "    sub     r2, r0")?;
+        writeln!(self.out, "    mov     r0, r2")?; // r0 = |dividend|
+        writeln!(self.out, ".Ldm_dpos:")?;
+
+        // Make divisor positive
+        writeln!(self.out, "    cls     r1, z")?; // C = (divisor < 0)
+        writeln!(self.out, "    brf     .Ldm_vpos")?;
+        writeln!(self.out, "    mov     r2, z")?;
+        writeln!(self.out, "    sub     r2, r1")?;
+        writeln!(self.out, "    mov     r1, r2")?; // r1 = |divisor|
+        writeln!(self.out, ".Ldm_vpos:")?;
+
+        // Unsigned division: r0 = |dividend|, r1 = |divisor|
+        // Result: r2 = quotient, r0 = remainder
+        writeln!(self.out, "    mov     r2, z")?; // quotient = 0
+        writeln!(self.out, ".Ldm_loop:")?;
+        writeln!(self.out, "    cls     r0, r1")?; // C = (dividend < divisor)
+        writeln!(self.out, "    brt     .Ldm_done")?; // done if dividend < divisor
+        writeln!(self.out, "    sub     r0, r1")?; // dividend -= divisor
+        writeln!(self.out, "    add     r2, 1")?; // quotient++
+        writeln!(self.out, "    bra     .Ldm_loop")?;
+        writeln!(self.out, ".Ldm_done:")?;
+
+        // r2 = |quotient|, r0 = |remainder|
+        // Fix signs based on original operands
+        writeln!(self.out, "    mov     r1, r0")?; // r1 = |remainder|
+        writeln!(self.out, "    mov     r0, r2")?; // r0 = |quotient|
+
+        // Pop original divisor and dividend to check signs
+        writeln!(self.out, "    pop     r2")?; // r2 = original divisor
+        writeln!(self.out, "    push    r0")?; // save |quotient|
+        writeln!(self.out, "    push    r1")?; // save |remainder|
+
+        // Negate remainder if original dividend was negative
+        writeln!(self.out, "    lw      r0, 6(sp)")?; // original dividend (pushed first, 2 above)
+        writeln!(self.out, "    cls     r0, z")?;
+        writeln!(self.out, "    brf     .Ldm_rpos")?;
+        writeln!(self.out, "    lw      r1, 0(sp)")?; // |remainder|
+        writeln!(self.out, "    mov     r0, z")?;
+        writeln!(self.out, "    sub     r0, r1")?;
+        writeln!(self.out, "    sw      r0, 0(sp)")?; // remainder = -|remainder|
+        writeln!(self.out, ".Ldm_rpos:")?;
+
+        // Negate quotient if signs differ (dividend XOR divisor is negative)
+        writeln!(self.out, "    lw      r0, 6(sp)")?; // original dividend
+        writeln!(self.out, "    xor     r0, r2")?; // XOR with original divisor
+        writeln!(self.out, "    cls     r0, z")?; // C = (XOR < 0) = signs differ
+        writeln!(self.out, "    brf     .Ldm_qpos")?;
+        writeln!(self.out, "    lw      r1, 3(sp)")?; // |quotient|
+        writeln!(self.out, "    mov     r0, z")?;
+        writeln!(self.out, "    sub     r0, r1")?;
+        writeln!(self.out, "    sw      r0, 3(sp)")?; // quotient = -|quotient|
+        writeln!(self.out, ".Ldm_qpos:")?;
+
+        // Load results: r0 = quotient, r1 = remainder
+        writeln!(self.out, "    pop     r1")?; // remainder
+        writeln!(self.out, "    pop     r0")?; // quotient
+        writeln!(self.out, "    pop     r2")?; // discard original dividend
+
+        // Return: pop return address and jump
+        writeln!(self.out, "    pop     r2")?; // return address
+        writeln!(self.out, "    jmp     (r2)")?;
+        writeln!(self.out)?;
+
+        Ok(())
+    }
 }
 
 // ── Utility functions ──────────────────────────────────────────────
@@ -496,6 +959,12 @@ fn local_frame_offset(slot: u8) -> Result<i8, EmitError> {
         return Err(EmitError::LocalOffsetTooLarge { offset: slot });
     }
     Ok(offset as i8)
+}
+
+/// Compute the frame offset for an argument.
+/// `arg[idx]` is at `fp + FRAME_HEADER + (nargs - 1 - idx) * 3`.
+fn arg_frame_offset(nargs: u8, idx: u8) -> i16 {
+    FRAME_HEADER as i16 + (nargs as i16 - 1 - idx as i16) * WORD as i16
 }
 
 /// Sign-extend a 24-bit value stored in a u32 to an i32.
@@ -685,6 +1154,7 @@ mod tests {
         let bin = make_p24(code, 0);
         let prog = decode_program(&bin).unwrap();
         let asm = emit_program(&prog, "test").unwrap();
+        assert!(asm.contains("push    r1")); // save return address
         assert!(asm.contains("push    fp"));
         assert!(asm.contains("mov     fp, sp"));
         assert!(asm.contains("sub     sp, 6")); // 2 locals * 3 bytes
@@ -753,6 +1223,52 @@ mod tests {
     }
 
     #[test]
+    fn emit_call_and_ret() {
+        // Main: push 42, call 0x0009, halt
+        // Proc at 0x0009: enter 0, loada 0, drop, ret 1, leave
+        let code: &[u8] = &[
+            0x01, 0x2A, 0x00, 0x00, // 0000: push 42 (argument)
+            0x33, 0x09, 0x00, 0x00, // 0004: call 0x0009
+            0x00, // 0008: halt
+            0x40, 0x00, // 0009: enter 0
+            0x48, 0x00, // 000B: loada 0
+            0x04, // 000D: drop
+            0x34, 0x01, // 000E: ret 1
+            0x41, // 0010: leave
+        ];
+        let bin = make_p24(code, 0);
+        let prog = decode_program(&bin).unwrap();
+        let asm = emit_program(&prog, "test").unwrap();
+
+        // Call should use jal
+        assert!(asm.contains("jal     r1, (r2)"));
+        // Enter should save r1
+        assert!(asm.contains("push    r1"));
+        // Loada should access arg at fp+6 (nargs=1, idx=0: offset=6)
+        assert!(asm.contains("lw      r0, 6(fp)"));
+        // Ret should restore frame
+        assert!(asm.contains("pop     fp"));
+        assert!(asm.contains("jmp     (r2)"));
+        // Ret should clean 1 arg (3 bytes)
+        assert!(asm.contains("add     sp, 3"));
+    }
+
+    #[test]
+    fn emit_sys_putc() {
+        // push 65, sys 1, halt  (print 'A')
+        let code: &[u8] = &[
+            0x01, 0x41, 0x00, 0x00, // push 65
+            0x60, 0x01, // sys 1 (putc)
+            0x00, // halt
+        ];
+        let bin = make_p24(code, 0);
+        let prog = decode_program(&bin).unwrap();
+        let asm = emit_program(&prog, "test").unwrap();
+        assert!(asm.contains("0xFF0100")); // UART address
+        assert!(asm.contains("sb      r0, 0(r1)")); // write char
+    }
+
+    #[test]
     fn emit_full_program_from_p24_file() {
         let bin = std::fs::read(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -766,8 +1282,56 @@ mod tests {
             assert!(asm.contains("la      sp,"));
             assert!(asm.contains("_p24_halt:"));
             // Should contain some of our supported opcodes
+            assert!(asm.contains("push    r1")); // from enter (saves return addr)
             assert!(asm.contains("push    fp")); // from enter
             assert!(asm.contains("_p24_globals")); // globals section
         }
+    }
+
+    #[test]
+    fn emit_procedure_call_program() {
+        let bin = std::fs::read(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/p24/procedure_call.p24"
+        ));
+        if let Ok(bin) = bin {
+            let prog = decode_program(&bin).unwrap();
+            let asm = emit_program(&prog, "procedure_call.p24").unwrap();
+            // Should not contain any unsupported opcode TODOs for call/ret/sys/loada
+            assert!(
+                !asm.contains("TODO: unsupported opcode call"),
+                "call should be supported"
+            );
+            assert!(
+                !asm.contains("TODO: unsupported opcode ret"),
+                "ret should be supported"
+            );
+            assert!(
+                !asm.contains("TODO: unsupported opcode sys"),
+                "sys should be supported"
+            );
+            assert!(
+                !asm.contains("TODO: unsupported opcode loada"),
+                "loada should be supported"
+            );
+            // Should contain jal for calls
+            assert!(asm.contains("jal     r1, (r2)"));
+            // Should contain UART access for putc
+            assert!(asm.contains("0xFF0100"));
+            // Should have divmod helper (write_int uses div/mod)
+            assert!(asm.contains("_p24_divmod:"));
+        }
+    }
+
+    #[test]
+    fn arg_offset_calculation() {
+        // nargs=1, idx=0: offset = 6 + (1-1-0)*3 = 6
+        assert_eq!(arg_frame_offset(1, 0), 6);
+        // nargs=2, idx=0: offset = 6 + (2-1-0)*3 = 9
+        assert_eq!(arg_frame_offset(2, 0), 9);
+        // nargs=2, idx=1: offset = 6 + (2-1-1)*3 = 6
+        assert_eq!(arg_frame_offset(2, 1), 6);
+        // nargs=3, idx=0: offset = 6 + (3-1-0)*3 = 12
+        assert_eq!(arg_frame_offset(3, 0), 12);
     }
 }

@@ -1,6 +1,6 @@
 number = 6
 slug = "procedure-calls"
-status = "pending"
+status = "in-progress"
 description = """
 Add procedure call and return lowering. Implement activation record
 setup and runtime helper calls.

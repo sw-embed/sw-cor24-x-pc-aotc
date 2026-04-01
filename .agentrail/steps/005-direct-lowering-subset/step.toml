@@ -1,6 +1,6 @@
 number = 5
 slug = "direct-lowering-subset"
-status = "in-progress"
+status = "completed"
 description = """
 Implement direct p-code to .s translation for a tiny subset of opcodes.
 This is the proof-of-concept that validates the whole pipeline.
@@ -47,3 +47,4 @@ This is the proof-of-concept that validates the whole pipeline.
 role = "production"
 context_files = []
 created_at = "2026-03-31T01:26:00"
+completed_at = "2026-04-01T05:49:32"

@@ -446,6 +446,8 @@ pub struct ProcedureInfo {
     pub entry_pc: u32,
     /// Number of local variable slots (from the `enter` instruction).
     pub num_locals: u8,
+    /// Number of arguments cleaned by `ret` (`None` if no `ret` found).
+    pub nargs: Option<u8>,
     /// Index range into `Program::instructions` for this procedure's instructions.
     pub instr_start: usize,
     pub instr_end: usize,
