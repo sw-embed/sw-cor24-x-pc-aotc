@@ -25,6 +25,13 @@ indirect memory access. Runtime library procedures (write_int, writeln,
 etc.) compile through the AOT pipeline. CLI reads `.p24` files and
 writes `.s` assembly output.
 
+**Differential testing harness** validates AOT-compiled native output
+against the p-code interpreter (`pv24t`). Available as both a shell
+script (`tests/run_diff_tests.sh`) and Rust integration tests
+(`cargo test -p pcode-aotc`). Currently all 8 test programs fail at
+the assembly stage due to instruction set incompatibilities between the
+emitter output and the `cor24-run` assembler.
+
 ## Naming Convention
 
 | Prefix | Meaning | Example |
