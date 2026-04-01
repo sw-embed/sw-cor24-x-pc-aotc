@@ -1,6 +1,6 @@
 number = 7
 slug = "differential-testing"
-status = "pending"
+status = "in-progress"
 description = """
 Build the differential test harness that validates AOT output against
 the interpreter.
