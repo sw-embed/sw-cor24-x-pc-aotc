@@ -1,0 +1,9 @@
+[workspace]
+members = [
+    "crates/pcode-model",
+    "crates/pcode-analyze",
+    "crates/pcode-lower",
+    "crates/cor24-emit-asm",
+    "crates/pcode-aotc",
+]
+resolver = "2"

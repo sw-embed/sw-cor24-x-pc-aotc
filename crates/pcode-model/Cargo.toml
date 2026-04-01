@@ -1,0 +1,5 @@
+[package]
+name = "pcode-model"
+version = "0.1.0"
+edition = "2021"
+description = "P-code opcode definitions, decoded instructions, and procedure metadata"

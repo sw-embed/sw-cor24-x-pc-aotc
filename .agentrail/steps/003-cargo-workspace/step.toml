@@ -1,6 +1,6 @@
 number = 3
 slug = "cargo-workspace"
-status = "pending"
+status = "in-progress"
 description = """
 Set up the Rust cargo workspace with crate stubs. Verify everything
 builds and empty tests pass.

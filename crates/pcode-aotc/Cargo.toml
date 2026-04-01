@@ -1,0 +1,11 @@
+[package]
+name = "pcode-aotc"
+version = "0.1.0"
+edition = "2021"
+description = "AOT compiler CLI: translates p-code bytecode into COR24 native assembly"
+
+[dependencies]
+pcode-model = { path = "../pcode-model" }
+pcode-analyze = { path = "../pcode-analyze" }
+pcode-lower = { path = "../pcode-lower" }
+cor24-emit-asm = { path = "../cor24-emit-asm" }

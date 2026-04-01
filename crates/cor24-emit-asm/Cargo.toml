@@ -1,0 +1,8 @@
+[package]
+name = "cor24-emit-asm"
+version = "0.1.0"
+edition = "2021"
+description = "COR24 assembly emission from lowered IR"
+
+[dependencies]
+pcode-model = { path = "../pcode-model" }

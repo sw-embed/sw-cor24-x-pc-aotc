@@ -1,0 +1,8 @@
+[package]
+name = "pcode-lower"
+version = "0.1.0"
+edition = "2021"
+description = "Lowering from p-code to intermediate representation"
+
+[dependencies]
+pcode-model = { path = "../pcode-model" }

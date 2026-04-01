@@ -1,0 +1,8 @@
+[package]
+name = "pcode-analyze"
+version = "0.1.0"
+edition = "2021"
+description = "CFG formation, stack-depth analysis, and validation for p-code"
+
+[dependencies]
+pcode-model = { path = "../pcode-model" }
