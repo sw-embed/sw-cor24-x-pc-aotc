@@ -1,6 +1,6 @@
 number = 2
 slug = "interpreter-tracing"
-status = "pending"
+status = "in-progress"
 description = """
 Add a tracing mode to the p-code interpreter (pv24a) that logs execution
 state for each instruction. This becomes the golden reference for

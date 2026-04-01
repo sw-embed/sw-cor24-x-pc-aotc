@@ -1,6 +1,6 @@
 number = 1
 slug = "formalize-contracts"
-status = "in-progress"
+status = "completed"
 description = """
 Document the p-code instruction semantics, activation record layout,
 calling convention, runtime helper ABI, memory regions, and error behavior.
@@ -39,3 +39,4 @@ calling convention, runtime helper ABI, memory regions, and error behavior.
 role = "production"
 context_files = []
 created_at = "2026-03-31T01:26:00"
+completed_at = "2026-03-31T16:51:11"

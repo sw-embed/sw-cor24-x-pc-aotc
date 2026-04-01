@@ -1,0 +1,6 @@
+/target/
+Cargo.lock
+
+# Generated test artifacts (regenerate with scripts/run-tests.sh)
+tests/p24/
+tests/traces/
