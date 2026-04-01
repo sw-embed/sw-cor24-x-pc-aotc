@@ -1,0 +1,1 @@
+Set up Rust cargo workspace with 5 crates: pcode-model, pcode-analyze, pcode-lower, cor24-emit-asm, pcode-aotc. Each lib crate has doc comment and placeholder test. CLI binary prints version/usage. All checks clean: cargo build, test, clippy, fmt.

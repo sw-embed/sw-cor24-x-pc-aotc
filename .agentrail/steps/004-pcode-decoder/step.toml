@@ -1,6 +1,6 @@
 number = 4
 slug = "pcode-decoder"
-status = "pending"
+status = "in-progress"
 description = """
 Implement p-code file parsing and instruction decoding in pcode-model.
 
