@@ -1,6 +1,6 @@
 number = 8
 slug = "control-flow"
-status = "pending"
+status = "in-progress"
 description = """
 Complete control flow lowering and add basic block analysis.
 

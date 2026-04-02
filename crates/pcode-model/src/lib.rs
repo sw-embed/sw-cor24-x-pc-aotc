@@ -346,6 +346,71 @@ impl Opcode {
     }
 }
 
+impl Opcode {
+    /// Return the eval stack depth change for this opcode.
+    ///
+    /// Positive means net pushes, negative means net pops.
+    /// Returns `None` for opcodes whose effect is dynamic or context-dependent
+    /// (e.g., `Ret`, `Sys`, `Enter`, `Leave`).
+    pub fn stack_delta(self) -> Option<i8> {
+        match self {
+            // ( -- )
+            Opcode::Halt | Opcode::Jmp | Opcode::Trap => Some(0),
+            // ( -- n )
+            Opcode::Push
+            | Opcode::PushS
+            | Opcode::Loadl
+            | Opcode::Loadg
+            | Opcode::Loada
+            | Opcode::Addrl
+            | Opcode::Addrg
+            | Opcode::Loadn => Some(1),
+            // ( a -- a a )
+            Opcode::Dup => Some(1),
+            // ( a -- )
+            Opcode::Drop | Opcode::Storel | Opcode::Storeg | Opcode::Storea | Opcode::Storen => {
+                Some(-1)
+            }
+            // ( a b -- b a )
+            Opcode::Swap => Some(0),
+            // ( a b -- a b a )
+            Opcode::Over => Some(1),
+            // ( a b -- c ) — binary ops
+            Opcode::Add
+            | Opcode::Sub
+            | Opcode::Mul
+            | Opcode::Div
+            | Opcode::Mod
+            | Opcode::And
+            | Opcode::Or
+            | Opcode::Xor
+            | Opcode::Shl
+            | Opcode::Shr
+            | Opcode::Eq
+            | Opcode::Ne
+            | Opcode::Lt
+            | Opcode::Le
+            | Opcode::Gt
+            | Opcode::Ge => Some(-1),
+            // ( a -- b ) — unary ops
+            Opcode::Neg | Opcode::Not => Some(0),
+            // ( flag -- ) — conditional jump pops flag
+            Opcode::Jz | Opcode::Jnz => Some(-1),
+            // ( addr -- val )
+            Opcode::Load | Opcode::Loadb => Some(0),
+            // ( val addr -- )
+            Opcode::Store | Opcode::Storeb => Some(-2),
+            // Dynamic/context-dependent
+            Opcode::Call
+            | Opcode::Calln
+            | Opcode::Ret
+            | Opcode::Enter
+            | Opcode::Leave
+            | Opcode::Sys => None,
+        }
+    }
+}
+
 impl std::fmt::Display for Opcode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.mnemonic())
@@ -418,6 +483,33 @@ impl Instruction {
     /// Size of this instruction in bytes.
     pub fn size(&self) -> usize {
         self.op.size()
+    }
+
+    /// Return the eval stack depth change for this instruction.
+    ///
+    /// Unlike `Opcode::stack_delta`, this considers the operand for
+    /// context-dependent opcodes like `Sys`. Returns `None` for opcodes
+    /// whose effect truly cannot be determined statically (Call, Ret, Enter, Leave).
+    pub fn stack_delta(&self) -> Option<i8> {
+        match self.op {
+            Opcode::Sys => {
+                if let Operand::Imm8(id) = self.operand {
+                    match SysCall::from_id(id) {
+                        Some(SysCall::Halt) => Some(0),
+                        Some(SysCall::Putc) => Some(-1), // ( char -- )
+                        Some(SysCall::Getc) => Some(1),  // ( -- char )
+                        Some(SysCall::Led) => Some(-1),  // ( val -- )
+                        Some(SysCall::Alloc) => Some(0), // ( size -- addr )
+                        Some(SysCall::Free) => Some(-1), // ( addr -- )
+                        Some(SysCall::ReadSwitch) => Some(1), // ( -- val )
+                        None => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            _ => self.op.stack_delta(),
+        }
     }
 }
 

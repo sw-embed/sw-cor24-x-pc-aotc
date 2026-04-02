@@ -25,12 +25,19 @@ indirect memory access. Runtime library procedures (write_int, writeln,
 etc.) compile through the AOT pipeline. CLI reads `.p24` files and
 writes `.s` assembly output.
 
+**Control flow analysis** — `pcode-analyze` crate provides CFG
+construction (basic block identification, successor/predecessor edges),
+stack-depth propagation across blocks, and consistency validation at
+merge points. Handles variable-depth loops and call-site argument
+patterns correctly.
+
 **Differential testing harness** validates AOT-compiled native output
 against the p-code interpreter (`pv24t`). Available as both a shell
 script (`tests/run_diff_tests.sh`) and Rust integration tests
-(`cargo test -p pcode-aotc`). Currently all 8 test programs fail at
-the assembly stage due to instruction set incompatibilities between the
-emitter output and the `cor24-run` assembler.
+(`cargo test -p pcode-aotc`). Test corpus: 11 Pascal programs covering
+arithmetic, locals, globals, if/else, while loops, for loops, nested
+loops, complex conditionals, procedure calls, recursion, and nested
+calls.
 
 ## Naming Convention
 
