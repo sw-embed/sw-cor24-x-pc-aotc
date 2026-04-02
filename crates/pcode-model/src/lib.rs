@@ -168,6 +168,12 @@ pub enum Opcode {
     // System calls (0x60)
     /// System call by id. Stack effect varies by id.
     Sys = 0x60,
+
+    // Memory block operations (0x70–0x71)
+    /// Copy len bytes from src to dst (memmove semantics). `( src dst len -- )`
+    Memcpy = 0x70,
+    /// Fill len bytes at dst with byte value. `( dst val len -- )`
+    Memset = 0x71,
 }
 
 impl Opcode {
@@ -201,7 +207,9 @@ impl Opcode {
             | Opcode::Load
             | Opcode::Store
             | Opcode::Loadb
-            | Opcode::Storeb => Encoding::None,
+            | Opcode::Storeb
+            | Opcode::Memcpy
+            | Opcode::Memset => Encoding::None,
 
             Opcode::PushS
             | Opcode::Ret
@@ -286,6 +294,8 @@ impl Opcode {
             0x52 => Some(Opcode::Loadb),
             0x53 => Some(Opcode::Storeb),
             0x60 => Some(Opcode::Sys),
+            0x70 => Some(Opcode::Memcpy),
+            0x71 => Some(Opcode::Memset),
             _ => None,
         }
     }
@@ -342,6 +352,8 @@ impl Opcode {
             Opcode::Loadb => "loadb",
             Opcode::Storeb => "storeb",
             Opcode::Sys => "sys",
+            Opcode::Memcpy => "memcpy",
+            Opcode::Memset => "memset",
         }
     }
 }
@@ -400,6 +412,10 @@ impl Opcode {
             Opcode::Load | Opcode::Loadb => Some(0),
             // ( val addr -- )
             Opcode::Store | Opcode::Storeb => Some(-2),
+            // ( src dst len -- )
+            Opcode::Memcpy => Some(-3),
+            // ( dst val len -- )
+            Opcode::Memset => Some(-3),
             // Dynamic/context-dependent
             Opcode::Call
             | Opcode::Calln
@@ -632,6 +648,8 @@ mod tests {
             Opcode::Loadb,
             Opcode::Storeb,
             Opcode::Sys,
+            Opcode::Memcpy,
+            Opcode::Memset,
         ];
         for op in all {
             let byte = op as u8;

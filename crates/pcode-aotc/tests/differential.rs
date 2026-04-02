@@ -196,6 +196,8 @@ fn run_native(cor24_run: &Path, s_file: &Path) -> Result<String, String> {
                 && !line.starts_with("Running")
                 && !line.starts_with("Executed")
                 && !line.starts_with("Loaded")
+                && !line.starts_with("UART output:")
+                && !line.starts_with("CPU halted")
                 && !line.is_empty()
                 && line.trim() != "HALT"
         })

@@ -1,6 +1,6 @@
 number = 8
 slug = "control-flow"
-status = "in-progress"
+status = "completed"
 description = """
 Complete control flow lowering and add basic block analysis.
 
@@ -39,3 +39,4 @@ Complete control flow lowering and add basic block analysis.
 role = "production"
 context_files = []
 created_at = "2026-03-31T01:26:00"
+completed_at = "2026-04-01T18:40:38"

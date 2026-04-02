@@ -202,9 +202,16 @@ run_test() {
     fi
 
     # Extract program output (filter emulator status lines)
-    actual=$(echo "$run_output" | grep -v '^\[' | grep -v '^Assembled' | \
-        grep -v '^Running' | grep -v '^Executed' | grep -v '^Loaded' | \
-        grep -v '^$' | grep -v '^HALT$' || true)
+    # Reconstruct program output from UART TX trace lines
+    # Format: [UART TX @ N] 'X'  (0xHH) or [UART TX @ N] '\n'
+    actual=$(echo "$run_output" | grep '^\[UART TX' | while IFS= read -r line; do
+        if echo "$line" | grep -q "'\\\\n'"; then
+            printf '\n'
+        else
+            char=$(echo "$line" | sed "s/.*'\\(.*\\)'.*/\\1/")
+            printf '%s' "$char"
+        fi
+    done || true)
 
     # Step 4: Compare
     if [ "$expected" = "$actual" ]; then

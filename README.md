@@ -20,10 +20,18 @@ translate at runtime on the target hardware.
 P-code decoder complete; assembly emitter handles stack ops, arithmetic,
 comparisons, control flow, frame setup, local/global variable access,
 procedure calls with parameter passing, return values, system calls
-(UART I/O), signed integer division/modulo, bitwise operations, and
-indirect memory access. Runtime library procedures (write_int, writeln,
-etc.) compile through the AOT pipeline. CLI reads `.p24` files and
-writes `.s` assembly output.
+(UART I/O), signed integer division/modulo, bitwise operations,
+indirect memory access (load/store/loadb/storeb), address-of operations
+(addrl/addrg), nonlocal variable access (loadn/storen via static link
+chain), and memory block operations (memcpy/memset). Runtime library
+procedures (write_int, writeln, etc.) compile through the AOT pipeline.
+CLI reads `.p24` files and writes `.s` assembly output.
+
+**Arrays and records** are supported via the p-code primitive operations:
+address computation (`addrg`/`addrl`), pointer arithmetic (`add`/`mul`),
+and indirect memory access (`load`/`store`/`loadb`/`storeb`). Block copy
+(`memcpy`) and fill (`memset`) operations support record/array assignment.
+All generated assembly is compatible with the COR24 cross-assembler.
 
 **Control flow analysis** — `pcode-analyze` crate provides CFG
 construction (basic block identification, successor/predecessor edges),
@@ -34,10 +42,11 @@ patterns correctly.
 **Differential testing harness** validates AOT-compiled native output
 against the p-code interpreter (`pv24t`). Available as both a shell
 script (`tests/run_diff_tests.sh`) and Rust integration tests
-(`cargo test -p pcode-aotc`). Test corpus: 11 Pascal programs covering
+(`cargo test -p pcode-aotc`). Test corpus: 18 programs covering
 arithmetic, locals, globals, if/else, while loops, for loops, nested
-loops, complex conditionals, procedure calls, recursion, and nested
-calls.
+loops, complex conditionals, procedure calls, recursion, nested calls,
+array indexing, byte arrays, record field access, indirect stores,
+array summation, memcpy, and memset. All 18 pass differential testing.
 
 ## Naming Convention
 
